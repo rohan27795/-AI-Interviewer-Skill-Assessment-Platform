@@ -33,7 +33,6 @@ get_app.py
 
 # ─── Development artefacts ───────────────────────────────────
 *.log
-*.txt
 *.bat
 dump.rdb
 
