@@ -26,53 +26,10 @@ env:
   TF_DIR:          infra/terraform
 
 jobs:
-  # ── Job 1: Terraform ────────────────────────────────────────
-  terraform:
-    name: Terraform Apply
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Configure AWS credentials (OIDC — no stored keys)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/hireai-github-actions
-          role-session-name: GitHubActions-Terraform
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "1.7.5"
-
-      - name: Terraform Init
-        working-directory: ${{ env.TF_DIR }}
-        run: terraform init -input=false
-
-      - name: Terraform Validate
-        working-directory: ${{ env.TF_DIR }}
-        run: terraform validate
-
-      - name: Terraform Plan
-        working-directory: ${{ env.TF_DIR }}
-        run: |
-          terraform plan \
-            -input=false \
-            -out=tfplan \
-            -var="github_repo_owner=Ashishds" \
-            -var="github_repo_name=ai-interview"
-
-      - name: Terraform Apply
-        working-directory: ${{ env.TF_DIR }}
-        run: terraform apply -input=false -auto-approve tfplan
-
-  # ── Job 2: Build & Push Docker Image ────────────────────────
+  # ── Job 1: Build & Push Docker Image ────────────────────────
   build-and-push:
     name: Build & Push to ECR
     runs-on: ubuntu-latest
-    needs: terraform   # Only after infra is ready
     outputs:
       image: ${{ steps.build.outputs.image }}
 
