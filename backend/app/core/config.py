@@ -18,6 +18,8 @@ class Settings(BaseSettings):
         "http://localhost:3000",
         "http://localhost:3002",
         "https://hireai.vercel.app",
+        "https://hiring.ashishai.in",
+        "https://ashishai.in",
     ]
     
     # Supabase

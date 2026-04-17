@@ -49,7 +49,8 @@ Thumbs.db
 *.tfstate
 *.tfstate.backup
 *.tfvars
-.terraform.lock.hcl
+# NOTE: .terraform.lock.hcl is intentionally NOT ignored.
+# It pins provider versions and must be committed (like package-lock.json).
 
 # Docker
 *.log

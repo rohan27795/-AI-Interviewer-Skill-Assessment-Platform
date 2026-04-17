@@ -57,13 +57,15 @@ app = FastAPI(
 
 
 # ── CORS: Must be added FIRST ──
+# Production: locked to specific origins via ALLOWED_ORIGINS setting.
+# Local dev: set ALLOWED_ORIGINS in .env; it defaults to localhost:3002.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+    expose_headers=["Content-Length", "X-Process-Time"],
 )
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)

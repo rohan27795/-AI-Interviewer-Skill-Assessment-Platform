@@ -1,0 +1,108 @@
+# ============================================================
+# HireAI — Terraform Destroy Workflow
+#
+# MANUAL TRIGGER ONLY — never auto-runs on push.
+# Use this to cleanly tear down all AWS infrastructure.
+#
+# How to run:
+#   GitHub → Actions tab → "HireAI — Destroy AWS Infra"
+#   → "Run workflow" button → confirm
+# ============================================================
+
+name: HireAI — Destroy AWS Infra
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: |
+          Type DESTROY to confirm you want to tear down ALL AWS infrastructure.
+          This will delete ECS, ALB, Redis, S3, VPC, NAT Gateway, and SSM params.
+        required: true
+        type: string
+      environment:
+        description: "Environment to destroy (default: prod)"
+        required: false
+        default: "prod"
+        type: choice
+        options:
+          - prod
+          - staging
+
+permissions:
+  id-token: write   # Required for OIDC
+  contents: read
+
+env:
+  AWS_REGION:  ${{ secrets.AWS_REGION }}
+  TF_DIR:      infra/terraform
+
+jobs:
+  destroy:
+    name: Terraform Destroy
+    runs-on: ubuntu-latest
+
+    # Safety guard — only proceed if the user typed "DESTROY"
+    if: ${{ github.event.inputs.confirm == 'DESTROY' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC — no stored keys)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/hireai-github-actions
+          role-session-name: GitHubActions-Destroy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.5"
+
+      - name: Terraform Init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init -input=false
+
+      - name: Terraform Validate
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform validate
+
+      - name: Show what will be destroyed
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          echo "⚠️  Resources that will be DESTROYED:"
+          terraform plan -destroy \
+            -input=false \
+            -var="github_repo_owner=Ashishds" \
+            -var="github_repo_name=ai-interview" \
+            -var="environment=${{ github.event.inputs.environment }}"
+
+      # 30-second pause — gives you time to cancel if needed
+      - name: ⏸️  Final pause before destroy (30s to cancel)
+        run: |
+          echo "🔴 DESTROYING in 30 seconds. Cancel this workflow run NOW if you did not intend this."
+          sleep 30
+
+      - name: Terraform Destroy
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform destroy \
+            -input=false \
+            -auto-approve \
+            -var="github_repo_owner=Ashishds" \
+            -var="github_repo_name=ai-interview" \
+            -var="environment=${{ github.event.inputs.environment }}"
+
+      - name: Destroy summary
+        run: |
+          echo "✅ Terraform destroy complete."
+          echo "Environment : ${{ github.event.inputs.environment }}"
+          echo "Region      : ${{ env.AWS_REGION }}"
+          echo "Triggered by: ${{ github.actor }}"
+          echo ""
+          echo "ℹ️  Note: The S3 Terraform state bucket (hireai-terraform-state)"
+          echo "   is NOT managed by Terraform itself, so it was NOT deleted."
+          echo "   Delete it manually if you no longer need it:"
+          echo "   aws s3 rb s3://hireai-terraform-state --force"

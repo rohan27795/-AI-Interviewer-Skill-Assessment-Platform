@@ -1,0 +1,56 @@
+# ─── Python ──────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+.Python
+venv/
+env/
+.venv/
+*.egg
+
+# ─── Environment / Secrets ───────────────────────────────────
+# CRITICAL: Never bake secrets into the Docker image.
+# In production, all secrets come from AWS SSM Parameter Store.
+.env
+.env.*
+*.env
+
+# ─── Testing & Debug ─────────────────────────────────────────
+.pytest_cache/
+htmlcov/
+.coverage
+test_*.py
+*_test.py
+check_*.py
+debug_*.py
+seed_*.py
+insert_mock_*.py
+list_*.py
+diag_*.py
+get_app.py
+
+# ─── Development artefacts ───────────────────────────────────
+*.log
+*.txt
+*.bat
+dump.rdb
+
+# ─── IDE / OS ─────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# ─── Docs & extras not needed at runtime ─────────────────────
+README.md
+*.md
+render.yaml
+start_backend.py
+
+# ─── Database ─────────────────────────────────────────────────
+db/chroma.sqlite3
+db/
