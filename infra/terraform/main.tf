@@ -44,7 +44,7 @@ variable "frontend_url"     { default = "https://hiring.ashishai.in" }
 
 variable "certificate_arn"  {
   description = "ACM certificate ARN for hiring.ashishai.in (ap-south-1 region). Request via ACM Console then paste the ARN here."
-  default     = "arn:aws:acm:ap-south-1:212919533030:certificate/07a4473a-0505-48e4-8ece-05003e3917c7"
+  default     = "arn:aws:acm:ap-south-1:212919533030:certificate/a3bf97b3-5aad-4b46-87af-3d1437864e29"
 }
 
 data "aws_availability_zones" "available" {}
