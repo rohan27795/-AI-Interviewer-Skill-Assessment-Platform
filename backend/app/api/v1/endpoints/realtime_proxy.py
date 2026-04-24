@@ -91,7 +91,10 @@ class RealtimeInterviewSession:
         self.current_phase = InterviewPhase.INTRO
         self.started_at = datetime.utcnow()
         self._ai_turn_count: Dict[str, int] = {}   # phase → turns spoken by AI
-        self._partial_ai_text = ""                  # accumulate streaming transcript
+        self._candidate_turn_count: Dict[str, int] = {} # phase → turns spoken by candidate
+        self._partial_ai_text = ""                  # accumulate streaming AI transcript
+        self._partial_candidate_text = ""           # accumulate streaming candidate transcript
+        self._pending_candidate_item_id: Optional[str] = None  # track in-flight candidate audio item
         # Why the interview ended: "completed" | "early_exit" | "tab_guard"
         self.termination_reason: str = "completed"
         self._assessment_triggered: bool = False     # prevent double-trigger
@@ -192,6 +195,9 @@ class RealtimeInterviewSession:
         if speaker == "ai":
             phase = self.current_phase.value
             self._ai_turn_count[phase] = self._ai_turn_count.get(phase, 0) + 1
+        elif speaker == "candidate":
+            phase = self.current_phase.value
+            self._candidate_turn_count[phase] = self._candidate_turn_count.get(phase, 0) + 1
 
     # ── Phase management ──────────────────────────────────────────────────────
 
@@ -199,13 +205,22 @@ class RealtimeInterviewSession:
         """Decide if the AI has spoken enough to advance to the next phase."""
         if self.current_phase == InterviewPhase.COMPLETED:
             return False
+            
         phase = self.current_phase.value
-        turns = self._ai_turn_count.get(phase, 0)
+        ai_turns = self._ai_turn_count.get(phase, 0)
+        candidate_turns = self._candidate_turn_count.get(phase, 0)
+        
+        # CRITICAL: Do not advance if the candidate hasn't spoken at all in this phase.
+        # This prevents the AI from "interviewing itself" due to echo or noise.
+        if candidate_turns == 0 and ai_turns > 0:
+            return False
+            
         required = PHASE_MIN_TURNS.get(phase, 4)
-        if turns >= required:
+        if ai_turns >= required:
             return True
-        # Fast QA mode: still run all rounds, but cap wall-clock per phase (~1 min total if ≈15s × 4)
-        if settings.INTERVIEW_FAST_TEST and self.state_machine and turns >= 1:
+            
+        # Fast QA mode: still run all rounds, but cap wall-clock per phase
+        if settings.INTERVIEW_FAST_TEST and self.state_machine and ai_turns >= 1 and candidate_turns >= 1:
             started = self.state_machine.phase_start_times.get(self.current_phase)
             if started is not None:
                 elapsed = (datetime.utcnow() - started).total_seconds()
@@ -311,17 +326,19 @@ def _build_session_config(state_machine: InterviewStateMachine) -> Dict[str, Any
             "voice": "alloy",
             "input_audio_format": "pcm16",
             "output_audio_format": "pcm16",
+            # IMPORTANT: only 'model' is a valid field here.
+            # Adding 'language' or other unknown fields silently breaks Whisper transcription.
             "input_audio_transcription": {
-                "model": "whisper-1",   # enables server-side STT for transcript only
+                "model": "whisper-1",
             },
             "turn_detection": {
-                "type": "server_vad",   # server handles voice activity detection
-                "threshold": 0.8,
+                "type": "server_vad",
+                "threshold": 0.5,
                 "prefix_padding_ms": 300,
-                "silence_duration_ms": 1000,
+                "silence_duration_ms": 700,
             },
-            "temperature": 0.7,
-            "max_response_output_tokens": 400,
+            "temperature": 0.4,
+            "max_response_output_tokens": 350,
         },
     }
 
@@ -374,11 +391,7 @@ async def realtime_interview(
 
     print(f"[Realtime] Session {interview_id} — connected to OpenAI Realtime API")
 
-    # Send session config (voice, format, system prompt)
-    session_config = _build_session_config(session.state_machine)
-    await openai_ws.send(json.dumps(session_config))
-
-    # Trigger first assistant turn: do NOT put HireAI's script in role=user (that implies the candidate said it).
+    # Build kickoff details (will be sent after session.updated confirms our config)
     candidate_name = session.state_machine.resume_data.get("name", "Candidate")
     job_title = (session.state_machine.job_data.get("title") or "this role").strip()
     kickoff_instruction = (
@@ -387,18 +400,10 @@ async def realtime_interview(
         "application on file for this role, and ask one short question about what drew them to the role. "
         "Do not ask them to upload or resend a resume, and do not ask for a phone number for routine verification."
     )
-    await openai_ws.send(json.dumps({
-        "type": "conversation.item.create",
-        "item": {
-            "type": "message",
-            "role": "user",
-            "content": [{"type": "input_text", "text": kickoff_instruction}],
-        },
-    }))
-    await openai_ws.send(json.dumps({"type": "response.create"}))
 
     # Task flags
     interview_ended = False
+    _kickoff_sent = False  # ensure kickoff fires exactly once, after session is configured
 
     async def browser_to_openai():
         """Forward browser audio/control messages to OpenAI."""
@@ -488,7 +493,7 @@ async def realtime_interview(
 
     async def openai_to_browser():
         """Relay OpenAI events to the browser, with transcript interception."""
-        nonlocal interview_ended
+        nonlocal interview_ended, _kickoff_sent
         try:
             async for raw_event in openai_ws:
                 if interview_ended:
@@ -501,59 +506,117 @@ async def realtime_interview(
 
                 event_type = event.get("type", "")
 
+                # Log every event except high-frequency audio chunks
+                if event_type not in ("response.audio.delta", "response.output_audio.delta"):
+                    print(f"[Realtime][{interview_id}] ← {event_type}")
+                    log_error(f"EVENT: {event_type} | data: {json.dumps(event)[:300]}")
+
+                # ── Session ready: send our config ─────────────────────────
+                if event_type == "session.created":
+                    session_config = _build_session_config(session.state_machine)
+                    await openai_ws.send(json.dumps(session_config))
+                    print(f"[Realtime][{interview_id}] Sent session.update after session.created")
+
+                # ── Config confirmed: send kickoff ─────────────────────────
+                elif event_type == "session.updated" and not _kickoff_sent:
+                    _kickoff_sent = True
+                    print(f"[Realtime][{interview_id}] Session configured — sending kickoff")
+                    await openai_ws.send(json.dumps({
+                        "type": "conversation.item.create",
+                        "item": {
+                            "type": "message",
+                            "role": "system",
+                            "content": [{"type": "input_text", "text": kickoff_instruction}],
+                        },
+                    }))
+                    await openai_ws.send(json.dumps({"type": "response.create"}))
+
                 # ── Forward audio chunks directly ──────────────────────────
-                # OpenAI beta API: response.audio.delta
-                # OpenAI GA  API: response.output_audio.delta
-                if event_type in ("response.audio.delta", "response.output_audio.delta"):
+                elif event_type in ("response.audio.delta", "response.output_audio.delta"):
                     await websocket.send_json({
                         "type": "response.audio.delta",
                         "delta": event.get("delta") or event.get("audio") or "",
                     })
                     continue
 
-                # ── Live transcript streaming (candidate voice) ────────────
+                # ── VAD: candidate started speaking ────────────────────────
+                elif event_type == "input_audio_buffer.speech_started":
+                    session._partial_candidate_text = ""
+                    await websocket.send_json({"type": "speech_started"})
+
+                # ── VAD: candidate stopped speaking ────────────────────────
+                elif event_type == "input_audio_buffer.speech_stopped":
+                    await websocket.send_json({"type": "speech_stopped"})
+
+                # ── Candidate audio committed (speech turn finalized) ──────
+                elif event_type == "input_audio_buffer.committed":
+                    item_id = event.get("item_id", "")
+                    if item_id:
+                        session._pending_candidate_item_id = item_id
+
+                # ── Live candidate transcript delta (streaming) ────────────
+                elif event_type == "conversation.item.input_audio_transcription.delta":
+                    delta = event.get("delta", "").strip()
+                    if delta:
+                        session._partial_candidate_text += delta
+                        await websocket.send_json({
+                            "type": "transcript_update",
+                            "data": {"speaker": "candidate", "text": session._partial_candidate_text, "partial": True},
+                        })
+
+                # ── Candidate transcript complete (Whisper done) ───────────
                 elif event_type == "conversation.item.input_audio_transcription.completed":
-                    candidate_text = event.get("transcript", "").strip()
+                    candidate_text = (event.get("transcript") or session._partial_candidate_text).strip()
+                    session._partial_candidate_text = ""
+                    session._pending_candidate_item_id = None
                     if candidate_text:
+                        print(f"[Realtime][{interview_id}] Candidate said: {candidate_text[:100]}")
                         session.add_transcript("candidate", candidate_text)
                         await websocket.send_json({
                             "type": "transcript_update",
-                            "data": {"speaker": "candidate", "text": candidate_text},
+                            "data": {"speaker": "candidate", "text": candidate_text, "partial": False},
                         })
                         await session.save_state()
 
-                # ── Live transcript streaming (AI voice) ───────────────────
+                # ── Candidate transcript failed (Whisper error) ────────────
+                elif event_type == "conversation.item.input_audio_transcription.failed":
+                    partial = session._partial_candidate_text.strip()
+                    session._partial_candidate_text = ""
+                    session._pending_candidate_item_id = None
+                    error_msg = event.get("error", {}).get("message", "unknown")
+                    print(f"[Realtime][{interview_id}] Transcription FAILED: {error_msg}")
+                    if partial:
+                        session.add_transcript("candidate", partial)
+                        await websocket.send_json({
+                            "type": "transcript_update",
+                            "data": {"speaker": "candidate", "text": partial, "partial": False},
+                        })
+
+                # ── AI transcript streaming ────────────────────────────────
                 elif event_type in (
                     "response.audio_transcript.delta",
                     "response.output_audio_transcript.delta",
                 ):
                     delta = event.get("delta", "")
                     session._partial_ai_text += delta
-                    await websocket.send_json({
-                        "type": "response.audio_transcript.delta",
-                        "delta": delta,
-                    })
+                    await websocket.send_json({"type": "response.audio_transcript.delta", "delta": delta})
                     continue
 
-                # ── AI full turn transcript complete ───────────────────────
+                # ── AI transcript complete ─────────────────────────────────
                 elif event_type in (
                     "response.audio_transcript.done",
                     "response.output_audio_transcript.done",
                 ):
-                    full_text = (
-                        event.get("transcript")
-                        or event.get("text")
-                        or session._partial_ai_text
-                    )
+                    full_text = event.get("transcript") or event.get("text") or session._partial_ai_text
                     session._partial_ai_text = ""
                     if full_text:
+                        print(f"[Realtime][{interview_id}] AI said: {full_text[:100]}")
                         session.add_transcript("ai", full_text)
                         await websocket.send_json({
                             "type": "transcript_update",
                             "data": {"speaker": "ai", "text": full_text},
                         })
 
-                        # Check phase advancement after every AI turn
                         if session.should_advance_phase():
                             new_phase = await session.advance_phase()
                             if new_phase == InterviewPhase.COMPLETED:
@@ -561,24 +624,27 @@ async def realtime_interview(
                                 await session.end_interview()
                                 await websocket.send_json({
                                     "type": "interview_ended",
-                                    "data": {
-                                        "message": "Interview completed. Your assessment report will be ready shortly.",
-                                        "interview_id": interview_id,
-                                    },
+                                    "data": {"message": "Interview completed. Your assessment report will be ready shortly.", "interview_id": interview_id},
                                 })
                                 break
                             else:
-                                # Update system prompt for new phase
                                 new_config = _build_session_config(session.state_machine)
                                 await openai_ws.send(json.dumps(new_config))
 
                         await session.save_state()
 
-                # ── AI response finished (audio + transcript) ──────────────
+                # ── AI response done ───────────────────────────────────────
                 elif event_type == "response.done":
                     await websocket.send_json({"type": "response.done"})
 
-                # ── Forward all other events transparently ─────────────────
+                # ── Error from OpenAI ──────────────────────────────────────
+                elif event_type == "error":
+                    err_msg = event.get("error", {}).get("message", str(event))
+                    print(f"[Realtime][{interview_id}] OpenAI ERROR: {err_msg}")
+                    log_error(f"OpenAI error event: {err_msg}")
+                    await websocket.send_json({"type": "error", "data": {"message": err_msg}})
+
+                # ── Forward everything else transparently ──────────────────
                 else:
                     try:
                         await websocket.send_json(event)

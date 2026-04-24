@@ -91,7 +91,7 @@ export default function InterviewRoom({ params }: { params: { interviewId: strin
   const [inputText, setInputText] = useState('')
   const [isSending, setIsSending] = useState(false)
   const [scores, setScores] = useState({ technical: 0, communication: 0, confidence: 0 })
-  const [transcript, setTranscript] = useState<{ speaker: string; text: string }[]>([])
+  const [transcript, setTranscript] = useState<{ speaker: string; text: string; partial?: boolean }[]>([])
   const [activePanel, setActivePanel] = useState<'transcript' | 'insights' | null>('transcript')
   const [showRoundTransition, setShowRoundTransition] = useState(false)
 
@@ -111,20 +111,23 @@ export default function InterviewRoom({ params }: { params: { interviewId: strin
   const speakerOnRef = useRef(true)
   const micOnRef = useRef(true)
   // PCM16 playback state (Realtime API sends PCM16 at 24kHz)
-  const scheduledTimeRef = useRef(0)        // next sample to schedule
-  const micMutedRef = useRef(false)         // true while AI speaks
+  const scheduledTimeRef = useRef(0)        // next audio chunk schedule time
 
   // ── PCM16 playback via AudioContext (OpenAI Realtime sends PCM16 at 24kHz) ──
   const playPCM16Chunk = (base64Pcm: string) => {
     const ctx = audioContextRef.current
     if (!ctx || !speakerOnRef.current) return
 
-    // Decode base64 → Int16Array
-    const raw = atob(base64Pcm)
-    const int16 = new Int16Array(raw.length / 2)
-    for (let i = 0; i < int16.length; i++) {
-      int16[i] = (raw.charCodeAt(i * 2) & 0xff) | ((raw.charCodeAt(i * 2 + 1) & 0xff) << 8)
+    // Fast Base64 → Uint8Array
+    const binaryString = atob(base64Pcm)
+    const len = binaryString.length
+    const bytes = new Uint8Array(len)
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryString.charCodeAt(i)
     }
+
+    // Uint8Array → Int16Array
+    const int16 = new Int16Array(bytes.buffer)
 
     // Convert Int16 → Float32 [-1, 1]
     const float32 = new Float32Array(int16.length)
@@ -140,23 +143,20 @@ export default function InterviewRoom({ params }: { params: { interviewId: strin
     source.buffer = buffer
     source.connect(ctx.destination)
 
-    // Schedule this chunk right after the previous one
     const now = ctx.currentTime
     const startAt = Math.max(now, scheduledTimeRef.current)
     source.start(startAt)
     scheduledTimeRef.current = startAt + buffer.duration
 
-    // Mark AI as speaking; reset when the scheduled audio drains
+    // Mark AI as speaking
     setAiSpeaking(true)
     aiSpeakingRef.current = true
-    micMutedRef.current = true
 
     source.onended = () => {
       // Only clear speaking state when all scheduled audio has played
       if (ctx.currentTime >= scheduledTimeRef.current - 0.05) {
         setAiSpeaking(false)
         aiSpeakingRef.current = false
-        micMutedRef.current = false
       }
     }
   }
@@ -202,16 +202,42 @@ export default function InterviewRoom({ params }: { params: { interviewId: strin
           setTimeout(() => {
             setAiSpeaking(false)
             aiSpeakingRef.current = false
-            micMutedRef.current = false
           }, remaining + 300)
 
+        } else if (t === 'speech_started') {
+          // VAD detected candidate started speaking
+          setCandidateSpeaking(true)
+
+        } else if (t === 'speech_stopped') {
+          // VAD detected candidate stopped — keep indicator until transcript arrives
+
         } else if (t === 'transcript_update') {
-          const { speaker, text } = msg.data
-          setTranscript(prev => {
-            const last = prev[prev.length - 1]
-            if (last?.speaker === speaker && last?.text === text) return prev
-            return [...prev, { speaker, text }]
-          })
+          const { speaker, text, partial } = msg.data
+          if (partial) {
+            // Live partial update — update the last candidate message in-place or add new
+            setTranscript(prev => {
+              const last = prev[prev.length - 1]
+              if (last?.speaker === speaker && last?.partial) {
+                // Update last partial message in-place
+                return [...prev.slice(0, -1), { speaker, text, partial: true }]
+              }
+              return [...prev, { speaker, text, partial: true }]
+            })
+            if (speaker === 'candidate') setCandidateSpeaking(true)
+          } else {
+            // Final message — replace any trailing partial with the final version
+            setTranscript(prev => {
+              const last = prev[prev.length - 1]
+              if (last?.speaker === speaker && last?.partial) {
+                // Replace partial with final
+                return [...prev.slice(0, -1), { speaker, text, partial: false }]
+              }
+              // Guard against exact duplicates
+              if (last?.speaker === speaker && last?.text === text) return prev
+              return [...prev, { speaker, text, partial: false }]
+            })
+            if (speaker === 'candidate') setCandidateSpeaking(false)
+          }
 
         } else if (t === 'response.audio_transcript.delta') {
           // Show live partial AI transcript while audio streams
@@ -282,14 +308,17 @@ export default function InterviewRoom({ params }: { params: { interviewId: strin
 
       // Receive PCM chunks from worklet and send over WebSocket
       workletNode.port.onmessage = (e) => {
-        if (micMutedRef.current) return  // mute during AI speech
-        if (!micOnRef.current) return
+        if (!micOnRef.current) return  // user explicitly muted mic
+        
+        // CRITICAL: Suppress mic input while AI is speaking to prevent echo loops.
+        // This stops the AI from "hearing itself" and responding to its own voice.
+        if (aiSpeakingRef.current) return
+
         const ws = socketRef.current
         if (ws?.readyState === WebSocket.OPEN) {
           // e.data.audio is an ArrayBuffer containing Int16 PCM
           const bytes = new Uint8Array(e.data.audio);
           let binary = '';
-          // Process in smaller chunks if needed, but 12000 bytes is okay
           for (let i = 0; i < bytes.byteLength; i++) {
             binary += String.fromCharCode(bytes[i]);
           }
@@ -313,14 +342,11 @@ export default function InterviewRoom({ params }: { params: { interviewId: strin
 
   /** Stop AI speech and clear scheduled audio */
   const stopAISpeech = () => {
-    // Can't easily cancel scheduled AudioBufferSource nodes,
-    // but we can advance scheduledTime to now so next chunk plays immediately
     if (audioContextRef.current) {
       scheduledTimeRef.current = audioContextRef.current.currentTime
     }
     setAiSpeaking(false)
     aiSpeakingRef.current = false
-    micMutedRef.current = false
   }
 
   /** Handle mic button click */
@@ -456,9 +482,14 @@ export default function InterviewRoom({ params }: { params: { interviewId: strin
   const endInterview = () => {
     setIsEnding(true)
     sessionStorage.setItem('last_interview_id', params.interviewId || '')
+
+    // Determine if the interview was fully completed (all 4 rounds done)
+    // or ended early by the candidate clicking "End Session"
+    const allRoundsDone = currentRound === 'salary' && currentRoundIndex >= rounds.length - 1
+    const terminationReason = allRoundsDone ? 'completed' : 'early_exit'
+
     if (socketRef.current?.readyState === WebSocket.OPEN) {
-      // Send 'completed' = candidate voluntarily finished the interview
-      socketRef.current.send(JSON.stringify({ type: 'end_interview', reason: 'completed' }))
+      socketRef.current.send(JSON.stringify({ type: 'end_interview', reason: terminationReason }))
       setTimeout(() => { window.location.href = `/candidate/scorecard/${params.interviewId}` }, 1500)
     } else {
       window.location.href = `/candidate/scorecard/${params.interviewId}`
@@ -568,9 +599,10 @@ export default function InterviewRoom({ params }: { params: { interviewId: strin
       <AnimatePresence>
         {!hasStarted && (
           <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex flex-col items-center justify-center p-6 backdrop-blur-xl"
-            style={{ background: 'rgba(10,12,16,0.95)' }}
+            initial={{ opacity: 1 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            transition={{ duration: 0.4 }}
+            className="fixed inset-0 z-[100] flex flex-col items-center justify-center p-6 backdrop-blur-2xl"
+            style={{ background: '#0a0c10' }}
           >
             <div className="w-24 h-24 mb-8 relative">
               <div className="absolute inset-0 rounded-full bg-brand-500/20 animate-ping" />
@@ -685,8 +717,8 @@ export default function InterviewRoom({ params }: { params: { interviewId: strin
             </div>
 
             {/* Camera Panel */}
-            <div className="relative rounded-3xl overflow-hidden"
-              style={{ background: '#111317', border: '1px solid rgba(16,185,129,0.15)' }}>
+            <div className="relative rounded-3xl overflow-hidden transition-all duration-500"
+              style={{ background: '#111317', border: candidateSpeaking && !aiSpeaking ? '1px solid rgba(16,185,129,0.5)' : '1px solid rgba(16,185,129,0.15)', boxShadow: candidateSpeaking && !aiSpeaking ? '0 0 30px rgba(16,185,129,0.15)' : 'none' }}>
               {camOn ? (
                 <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover grayscale-[0.2]" />
               ) : (
@@ -696,9 +728,11 @@ export default function InterviewRoom({ params }: { params: { interviewId: strin
                 </div>
               )}
               <div className="absolute top-4 left-4 z-20 flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wide backdrop-blur-xl whitespace-nowrap"
-                style={{ background: 'rgba(13,15,22,0.8)', border: '1px solid rgba(16,185,129,0.3)', color: '#6ee7b7' }}>
-                <Mic className="w-3.5 h-3.5 shrink-0" />
-                <span className="leading-tight text-left">Your<br />video</span>
+                style={{ background: candidateSpeaking && !aiSpeaking ? 'rgba(5,40,20,0.9)' : 'rgba(13,15,22,0.8)', border: '1px solid rgba(16,185,129,0.3)', color: '#6ee7b7', transition: 'background 0.3s' }}>
+                <Mic className={`w-3.5 h-3.5 shrink-0 ${candidateSpeaking && !aiSpeaking ? 'text-emerald-400' : ''}`} />
+                <span className="leading-tight text-left">
+                  {candidateSpeaking && !aiSpeaking ? <>Speaking<br /><span className="text-emerald-300 font-black">●</span></> : <>Your<br />video</>}
+                </span>
               </div>
 
               {/* Industrial Integrity Shield UI [UPGRADED] */}
@@ -786,12 +820,25 @@ export default function InterviewRoom({ params }: { params: { interviewId: strin
             {transcript.map((msg, i) => (
               <div key={i} className={`flex flex-col gap-2 ${msg.speaker === 'ai' ? 'items-start' : 'items-end'}`}>
                 <div className="text-[9px] font-black uppercase tracking-widest text-white/40">{msg.speaker === 'ai' ? 'HireAI' : 'You'}</div>
-                <div className={`px-5 py-4 rounded-2xl text-[13px] leading-relaxed ${msg.speaker === 'ai' ? 'bg-brand-500/10 text-brand-50 border border-brand-500/20 rounded-tl-sm' : 'bg-surface-800 text-white rounded-tr-sm'
-                  }`}>
+                <div className={`px-5 py-4 rounded-2xl text-[13px] leading-relaxed transition-opacity duration-300 ${
+                  msg.speaker === 'ai'
+                    ? 'bg-brand-500/10 text-brand-50 border border-brand-500/20 rounded-tl-sm'
+                    : 'bg-surface-800 text-white rounded-tr-sm'
+                } ${msg.partial ? 'opacity-70 italic' : 'opacity-100'}`}>
                   {msg.text}
+                  {msg.partial && <span className="inline-block w-1.5 h-3.5 bg-white/50 ml-1 animate-pulse rounded-sm align-middle" />}
                 </div>
               </div>
             ))}
+            {/* Candidate speaking indicator */}
+            {candidateSpeaking && !aiSpeaking && (
+              <div className="flex gap-1.5 p-4 bg-emerald-500/5 rounded-xl border border-emerald-500/10 self-end">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce" style={{ animationDelay: '0s' }} />
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce" style={{ animationDelay: '0.2s' }} />
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce" style={{ animationDelay: '0.4s' }} />
+              </div>
+            )}
+            {/* AI speaking indicator */}
             {aiSpeaking && (
               <div className="flex gap-1.5 p-4 bg-brand-500/5 rounded-xl border border-brand-500/10 self-start">
                 <div className="w-1.5 h-1.5 rounded-full bg-brand-500 animate-bounce" style={{ animationDelay: '0s' }} />

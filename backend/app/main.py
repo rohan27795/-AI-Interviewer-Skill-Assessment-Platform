@@ -12,14 +12,10 @@ from fastapi.middleware.gzip import GZipMiddleware
 import subprocess
 import sys
 
-# --- EMERGENCY STARTUP RESCUE ---
 try:
     import email_validator
 except ImportError:
-    print("⚠️ EMERGENCY: email-validator missing at runtime! Installing now...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "email-validator"])
-    import email_validator
-    print("✅ SUCCESS: email-validator installed and loaded.")
+    pass # Let the app fail naturally if missing, or user can install it
 # -------------------------------
 
 from app.core.config import settings

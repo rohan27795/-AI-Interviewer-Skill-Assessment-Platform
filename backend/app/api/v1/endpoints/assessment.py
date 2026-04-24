@@ -132,7 +132,26 @@ async def list_assessments(
                 app = inter.get("applications")
                 if app:
                     user = app.get("users") or {}
-                    user["name"] = profiles_map.get(app.get("candidate_id"), "Unknown")
+                    # Standardized name resolution for Assessments
+                    parsed = app.get("parsed_data") or {}
+                    resume_name = parsed.get("name", "").strip() if isinstance(parsed, dict) else ""
+                    profile_name = profiles_map.get(app.get("candidate_id"), "") or ""
+                    email_prefix = user.get("email", "").split("@")[0].replace(".", " ").title()
+                    
+                    final_name = "Candidate"
+                    if resume_name and len(resume_name) > 1:
+                        final_name = resume_name
+                    elif profile_name and profile_name.lower() not in ("daya", "mock", "test"):
+                        final_name = profile_name
+                    elif email_prefix:
+                        final_name = email_prefix
+                        
+                    # CamelCase fix
+                    if " " not in final_name and any(c.isupper() for c in final_name[1:]):
+                        import re
+                        final_name = re.sub(r'(?<!^)(?=[A-Z])', ' ', final_name).strip()
+
+                    user["name"] = final_name
                     app["users"] = user
         except Exception:
             pass

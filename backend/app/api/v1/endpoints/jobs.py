@@ -2,7 +2,7 @@
 import uuid
 import json
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Response
 from openai import AsyncOpenAI
 
 from app.core.config import settings
@@ -164,6 +164,7 @@ async def generate_job_description(
 
 @router.get("/", response_model=list[JobResponse])
 async def list_jobs(
+    response: Response,
     is_active: Optional[bool] = Query(True),
     department: Optional[str] = None,
     search: Optional[str] = None,
@@ -172,10 +173,15 @@ async def list_jobs(
     current_user: Optional[dict] = Depends(get_current_user_optional),
 ):
     """List all active job postings."""
+    # Disable caching to ensure recruiter always sees fresh counts
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+
     supabase = get_supabase()
     query = supabase.table("jobs").select("*")
     
-    if current_user and current_user.get("role") == "recruiter":
+    # If recruiter is logged in, filter by their ID
+    if current_user and current_user.get("role") in ("recruiter", "admin"):
         query = query.eq("recruiter_id", current_user["sub"])
 
     if is_active is not None:
@@ -186,35 +192,69 @@ async def list_jobs(
     
     result = query.range(offset, offset + limit - 1).order("created_at", desc=True).execute()
     
-    # ── Fetch app counts ──
+    # ── Fetch app counts (Robust Version) ──
     try:
-        # We need stats per job id. We'll fetch applications for these jobs.
+        # 1. Initialize ALL jobs with 0 stats
+        for j in result.data:
+            j["applications_count"] = 0
+            j["shortlisted_count"] = 0
+            j["interviewed_count"] = 0
+            
         job_ids = [j['id'] for j in result.data]
         if job_ids:
-            apps_res = supabase.table("applications").select("job_id, status").in_("job_id", job_ids).execute()
+            # 2. Fetch ALL applications for these jobs
+            apps_res = supabase.table("applications").select("id, job_id, status").in_("job_id", job_ids).execute()
+            all_apps = apps_res.data or []
             
-            # Aggregate stats
-            stats_map = {jid: {"applications_count": 0, "shortlisted_count": 0, "interviewed_count": 0} for jid in job_ids}
-            for app in apps_res.data:
-                jid = app["job_id"]
-                st = app.get("status")
+            if all_apps:
+                all_app_ids = [a["id"] for a in all_apps]
                 
-                stats_map[jid]["applications_count"] += 1
+                # 3. Fetch ALL assessments (simple fetch, filter in Python)
+                assessments_res = supabase.table("assessments").select("interview_id").execute()
                 
-                if st in ("invited", "scheduled", "interviewing", "interviewed", "offered", "hired"):
-                    stats_map[jid]["shortlisted_count"] += 1
-                if st in ("interviewed", "offered", "hired"):
-                    stats_map[jid]["interviewed_count"] += 1
+                # Create a map of interview_id -> application_id from interviews table
+                interview_to_app_map = {}
+                interviews_res = supabase.table("interviews").select("id, application_id").in_("application_id", all_app_ids).execute()
+                for iv in (interviews_res.data or []):
+                    interview_to_app_map[iv["id"]] = iv["application_id"]
+                
+                interviewed_app_ids = set()
+                for ass in (assessments_res.data or []):
+                    iid = ass.get("interview_id")
+                    aid = interview_to_app_map.get(iid)
+                    if aid:
+                        interviewed_app_ids.add(aid)
+                
+                # 4. Aggregate
+                for j in result.data:
+                    jid = j["id"]
+                    j_apps = [a for a in all_apps if str(a["job_id"]) == str(jid)]
                     
-            for j in result.data:
-                jid = j["id"]
-                j["applications_count"] = stats_map[jid]["applications_count"]
-                j["shortlisted_count"] = stats_map[jid]["shortlisted_count"]
-                j["interviewed_count"] = stats_map[jid]["interviewed_count"]
+                    j["applications_count"] = len(j_apps)
+                    
+                    shortlisted = 0
+                    interviewed = 0
+                    
+                    for app in j_apps:
+                        aid = app["id"]
+                        st = app.get("status", "applied")
+                        
+                        # Logical interviewed: status is interviewed+ OR an assessment exists
+                        is_interviewed = st in ("interviewed", "offered", "hired") or aid in interviewed_app_ids
+                        # Logical shortlisted: progress beyond 'applied' or 'screening'
+                        is_shortlisted = st in ("invited", "scheduled", "interviewing", "interviewed", "offered", "hired") or is_interviewed
+                        
+                        if is_shortlisted:
+                            shortlisted += 1
+                        if is_interviewed:
+                            interviewed += 1
+                            
+                    j["shortlisted_count"] = shortlisted
+                    j["interviewed_count"] = interviewed
+                
     except Exception as e:
-        print(f"DEBUG: Failed to aggregate stats for jobs: {e}")
+        print(f"CRITICAL SYNC ERROR in jobs list: {str(e)}")
     
-    # Map 'type' back to 'job_type' if frontend expects it, or just return as is
     return result.data
 
 

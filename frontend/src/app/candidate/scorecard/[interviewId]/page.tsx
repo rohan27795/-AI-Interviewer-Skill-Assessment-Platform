@@ -176,7 +176,23 @@ export default function CandidateScorecardPage({ params }: { params: { interview
         const headers: Record<string, string> = {}
         if (token) headers['Authorization'] = `Bearer ${token}`
         const res = await axios.get(`${getApiUrl()}/api/v1/assessments/${params.interviewId}`, { headers })
-        if (!cancelled) { setAssessment(res.data); setTimeout(() => setHeroVisible(true), 100) }
+
+        const data = res.data
+        const dr = data.detailed_report || {}
+        const totalTurns = dr.total_turns_assessed || dr.transcript_turns || 0
+        const roundsDone = dr.rounds_completed || []
+        const overallScore = data.overall_score || 0
+
+        // If backend returned 200 but data is clearly empty/unprocessed, keep polling
+        // This handles the race condition where scorecard is queued but not yet generated
+        const isEmpty = overallScore === 0 && totalTurns === 0 && roundsDone.length === 0
+        if (isEmpty && attempt < 12) {
+          setPollingCount(attempt + 1)
+          timeout = setTimeout(() => fetchAssessment(attempt + 1), 4000)
+          return
+        }
+
+        if (!cancelled) { setAssessment(data); setTimeout(() => setHeroVisible(true), 100) }
       } catch (err: any) {
         if (cancelled) return
         const status = err.response?.status

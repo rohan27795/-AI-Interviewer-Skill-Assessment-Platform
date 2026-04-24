@@ -315,25 +315,28 @@ async def refresh_token(current_user: dict = Depends(get_current_user)):
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: dict = Depends(get_current_user)):
-    """Get current user with profile."""
-    supabase = get_supabase()
+    """Restore session - return full user and profile data from database."""
     user_id = current_user["sub"]
+    supabase = get_supabase()
     
     try:
         user_res = supabase.table("users").select("*").eq("id", user_id).single().execute()
         profile_res = supabase.table("profiles").select("*").eq("id", user_id).single().execute()
         user_data = user_res.data
         profile_data = profile_res.data
+        
         if not user_data:
-            raise ValueError("Missing data")
-    except Exception:
-        # Self-healing for session restoration
+            # Self-healing for session restoration
+            role = current_user.get("role", "candidate")
+            email = current_user.get("email", f"user_{user_id[:8]}@restored.com")
+            supabase.table("users").upsert({"id": user_id, "email": email, "role": role}).execute()
+            supabase.table("profiles").upsert({"id": user_id, "full_name": "Restored User"}).execute()
+            user_data = {"email": email, "role": role, "created_at": datetime.utcnow()}
+            profile_data = {"id": user_id, "full_name": "Restored User", "skills": []}
+    except Exception as e:
+        print(f"DEBUG: get_me sync warning: {e}")
         role = current_user.get("role", "candidate")
-        email = current_user.get("email", "")
-        # Upsert
-        supabase.table("users").upsert({"id": user_id, "email": email, "role": role}).execute()
-        supabase.table("profiles").upsert({"id": user_id, "full_name": "User"}).execute()
-        user_data = {"email": email, "role": role, "created_at": datetime.utcnow()}
+        user_data = {"email": "", "role": role, "created_at": datetime.utcnow()}
         profile_data = {"id": user_id, "full_name": "User", "skills": []}
 
     return UserResponse(

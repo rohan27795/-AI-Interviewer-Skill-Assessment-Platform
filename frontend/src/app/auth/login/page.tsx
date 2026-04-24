@@ -37,7 +37,10 @@ function LoginContent() {
       localStorage.setItem('hireai_token', data.access_token)
       localStorage.setItem('hireai_user', JSON.stringify(data.user))
       toast.success('Welcome back!')
-      router.push(role === 'recruiter' ? '/recruiter/jobs' : '/candidate/dashboard')
+      
+      // Route using the actual database role rather than the selected tab
+      const dbRole = data.user?.role || 'candidate'
+      router.push(dbRole === 'recruiter' || dbRole === 'admin' ? '/recruiter/jobs' : '/candidate/dashboard')
     } catch (err: any) {
       toast.error(err.message || 'Invalid credentials. Please try again.')
     } finally {

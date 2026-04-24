@@ -31,6 +31,7 @@ function ApplyContent() {
   const [job, setJob] = useState<any>(null)
   const [profile, setProfile] = useState<any>(null)
   const [useSavedResume, setUseSavedResume] = useState(false)
+  const [isInvited, setIsInvited] = useState(false)
 
   useEffect(() => {
     const fetchJobDetails = async () => {
@@ -54,7 +55,7 @@ function ApplyContent() {
     }
     fetchJobDetails()
 
-    // ── Pre-fill if logged in ──
+    // ── Pre-fill if logged in as candidate; block recruiters ──
     const fetchProfile = async () => {
       const token = localStorage.getItem('hireai_token')
       if (token) {
@@ -63,12 +64,22 @@ function ApplyContent() {
           const res = await axios.get(`${API_URL}/api/v1/profiles/me`, {
             headers: { Authorization: `Bearer ${token}` }
           })
-          setProfile(res.data)
-          if (res.data) {
+          const profileData = res.data
+
+          // Block recruiters/admins — they should not be applying for jobs
+          const role = profileData?.role || localStorage.getItem('hireai_role')
+          if (role === 'recruiter' || role === 'admin') {
+            // Don't pre-fill recruiter details; just leave the form empty
+            // so a real candidate can fill it manually
+            return
+          }
+
+          setProfile(profileData)
+          if (profileData) {
             setForm(prev => ({ 
               ...prev, 
-              name: res.data.full_name || prev.name, 
-              email: res.data.email || prev.email 
+              name: profileData.full_name || prev.name, 
+              email: profileData.email || prev.email 
             }))
           }
         } catch (e) {
@@ -118,7 +129,8 @@ function ApplyContent() {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
 
-      const { application_id } = response.data
+      const { application_id, interview_invited } = response.data
+      setIsInvited(interview_invited)
       setStep('done')
       localStorage.setItem('last_app_id', application_id)
     } catch (err: any) {
@@ -311,16 +323,33 @@ function ApplyContent() {
                 <CheckCircle className="w-10 h-10 text-green-500" />
               </div>
               <h2 className="text-3xl font-bold text-surface-900 mb-3">Application Submitted!</h2>
-              <p className="text-surface-600 max-w-md mx-auto mb-10">
-                Your application has been successfully received. We've analysed your profile and you meet the requirements for the next stage.
-              </p>
-              
-              <Link 
-                href={`/candidate/schedule?app_id=${localStorage.getItem('last_app_id')}`}
-                className="inline-flex items-center justify-center gap-2 bg-brand-600 hover:bg-brand-700 text-white font-bold px-10 py-4 rounded-2xl transition-all shadow-lg shadow-brand-100 hover:scale-105 active:scale-95"
-              >
-                Schedule Your Interview <ArrowRight className="w-4 h-4" />
-              </Link>
+              {isInvited ? (
+                <>
+                  <p className="text-surface-600 max-w-md mx-auto mb-10">
+                    Your application has been successfully received. We've analysed your profile and you meet the requirements for the next stage.
+                  </p>
+                  
+                  <Link 
+                    href={`/candidate/schedule?app_id=${typeof window !== 'undefined' ? localStorage.getItem('last_app_id') : ''}`}
+                    className="inline-flex items-center justify-center gap-2 bg-brand-600 hover:bg-brand-700 text-white font-bold px-10 py-4 rounded-2xl transition-all shadow-lg shadow-brand-100 hover:scale-105 active:scale-95"
+                  >
+                    Schedule Your Interview <ArrowRight className="w-4 h-4" />
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <p className="text-surface-600 max-w-md mx-auto mb-10">
+                    Your application has been successfully received and our team will review it. We will reach out to you via email if your profile matches our requirements.
+                  </p>
+                  
+                  <Link 
+                    href={`/candidate/jobs`}
+                    className="inline-flex items-center justify-center gap-2 bg-brand-100 hover:bg-brand-200 text-brand-700 font-bold px-10 py-4 rounded-2xl transition-all shadow-sm shadow-brand-50"
+                  >
+                    Browse Other Jobs
+                  </Link>
+                </>
+              )}
             </div>
           )}
         </div>

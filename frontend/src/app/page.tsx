@@ -592,11 +592,19 @@ export default function HomePage() {
       <footer className="bg-surface-950 py-12 border-t border-surface-800/60">
         <div className="max-w-7xl mx-auto px-6">
           <div className="flex flex-col md:flex-row justify-between items-center gap-6">
-            <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-              <Image src="/hireai-logo.png" alt="HireAI" width={32} height={32} className="rounded-lg object-cover opacity-80 logo-glow" />
-              <span className="font-bold text-lg text-white">HireAI</span>
-              <span className="text-surface-700 text-xs hidden sm:block">— AI Recruitment Platform</span>
-            </Link>
+            <div className="flex flex-col items-center md:items-start gap-3">
+              <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
+                <Image src="/hireai-logo.png" alt="HireAI" width={32} height={32} className="rounded-lg object-cover opacity-80 logo-glow" />
+                <span className="font-bold text-lg text-white">HireAI</span>
+                <span className="text-surface-700 text-xs hidden sm:block">— AI Recruitment Platform</span>
+              </Link>
+              <div className="text-xs text-surface-400 mt-1 flex items-center gap-2">
+                <span className="font-semibold text-surface-300">Contact Developer:</span>
+                <a href="mailto:ashishsingh0045@gmail.com" className="hover:text-white transition-colors">ashishsingh0045@gmail.com</a>
+                <span className="text-surface-700">•</span>
+                <a href="tel:6206605921" className="hover:text-white transition-colors">6206605921</a>
+              </div>
+            </div>
             <p className="text-xs text-surface-600 text-center">© 2026 HireAI Technologies. All rights reserved. Designed for smarter hiring.</p>
             <div className="flex gap-6">
               {['Privacy Policy', 'Terms of Service', 'Support'].map(link => (

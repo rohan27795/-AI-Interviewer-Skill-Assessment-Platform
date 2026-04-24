@@ -112,8 +112,12 @@ function ScheduleContent() {
           day.slots.push({ id: s.slot_id, time: new Date(s.start_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }), available: s.available })
         })
         setAvailableSlots(grouped)
-      } catch (err) {
-        toast.error('Failed to load slots')
+      } catch (err: any) {
+        if (err.response?.status === 403) {
+          setPageError(err.response?.data?.detail || "You do not meet the minimum score requirement.");
+        } else {
+          toast.error('Failed to load slots')
+        }
       } finally {
         setLoadingSlots(false)
       }
@@ -177,10 +181,12 @@ function ScheduleContent() {
       <div className="max-w-4xl mx-auto px-6 py-12">
         {pageError ? (
           <div className="text-center py-20 animate-fade-in">
-            <div className="w-20 h-20 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-6">
-              <AlertCircle className="w-10 h-10 text-red-500" />
+            <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 ${pageError?.includes('score') ? 'bg-blue-50' : 'bg-red-100'}`}>
+              <AlertCircle className={`w-10 h-10 ${pageError?.includes('score') ? 'text-blue-500' : 'text-red-500'}`} />
             </div>
-            <h2 className="text-2xl font-bold text-surface-900 mb-2">Something Went Wrong</h2>
+            <h2 className="text-2xl font-bold text-surface-900 mb-2">
+              {pageError?.includes('score') ? 'Application Under Review' : 'Something Went Wrong'}
+            </h2>
             <p className="text-surface-600 mb-8 max-w-sm mx-auto">{pageError}</p>
             <Link href="/" className="inline-flex items-center gap-2 text-brand-600 font-semibold hover:underline">
               Back to Homepage
@@ -190,9 +196,13 @@ function ScheduleContent() {
           <>
             <div className="text-center mb-10 animate-slide-up">
               {appData ? (
-                appData.ai_score > 0 ? (
+                appData.ai_score >= 0.50 ? (
                   <div className="inline-flex items-center gap-2 bg-green-50 text-green-700 border border-green-200 rounded-full px-4 py-2 text-sm font-semibold mb-4">
                     <CheckCircle className="w-4 h-4" /> {Math.round(appData.ai_score * 100)}% Fit Score — You have been Shortlisted
+                  </div>
+                ) : appData.ai_score > 0 ? (
+                  <div className="inline-flex items-center gap-2 bg-red-50 text-red-700 border border-red-200 rounded-full px-4 py-2 text-sm font-semibold mb-4">
+                    <AlertCircle className="w-4 h-4" /> {Math.round(appData.ai_score * 100)}% Fit Score — Application Under Review
                   </div>
                 ) : (
                   <div className="inline-flex items-center gap-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-4 py-2 text-sm font-semibold mb-4">

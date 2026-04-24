@@ -38,10 +38,15 @@ async def get_available_slots(application_id: str):
     """Get available interview time slots."""
     supabase = get_supabase()
     
-    # Verify application exists
-    app = supabase.table("applications").select("id, status").eq("id", application_id).execute()
+    from app.core.config import settings
+    # Verify application exists and meets threshold
+    app = supabase.table("applications").select("id, status, ai_score").eq("id", application_id).execute()
     if not app.data:
         raise HTTPException(status_code=404, detail="Application not found.")
+    
+    ai_score = app.data[0].get("ai_score") or 0.0
+    if ai_score < settings.MATCH_THRESHOLD:
+        raise HTTPException(status_code=403, detail="Your fit score does not meet the minimum requirement to schedule an interview.")
     
     # Get already-booked slots to exclude
     booked = supabase.table("interviews").select("scheduled_at").eq("status", "scheduled").execute()
@@ -94,6 +99,12 @@ async def book_slot(data: BookSlotRequest):
             candidate_name = profile_row.data.get("full_name", "")
     except Exception as e:
         print(f"WARN book_slot: profile query failed: {e}")
+    
+    # Fallback to email local part if name is missing
+    if not candidate_name and candidate_email:
+        candidate_name = candidate_email.split("@")[0].replace(".", " ").title()
+    if not candidate_name:
+        candidate_name = "Candidate"
     
     try:
         job_row = supabase.table("jobs").select("title").eq("id", job_id).single().execute()

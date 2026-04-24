@@ -38,6 +38,16 @@ const urgencyDot: Record<string, string> = {
   low:    'bg-green-500',
 }
 
+// ── Safelist for pipeline colors to prevent Tailwind purging ──────────────────
+const pipelineColors: Record<string, string> = {
+    'bg-brand-500': 'bg-brand-500',
+    'bg-brand-400': 'bg-brand-400',
+    'bg-accent-500': 'bg-accent-500',
+    'bg-warning-500': 'bg-warning-500',
+    'bg-success-500': 'bg-success-500',
+    'bg-emerald-600': 'bg-emerald-600',
+}
+
 const getIconComp = (iconName: string) => {
     switch(iconName) {
         case 'Users': return Users;
@@ -50,38 +60,34 @@ const getIconComp = (iconName: string) => {
     }
 }
 
-const weeklyTrend = [
-  { day: 'Mon', apps: 34, interviews: 12 },
-  { day: 'Tue', apps: 48, interviews: 18 },
-  { day: 'Wed', apps: 41, interviews: 15 },
-  { day: 'Thu', apps: 62, interviews: 24 },
-  { day: 'Fri', apps: 55, interviews: 20 },
-  { day: 'Sat', apps: 22, interviews: 8  },
-  { day: 'Sun', apps: 18, interviews: 5  },
-]
-const maxApps = Math.max(...weeklyTrend.map(d => d.apps))
-
-const sources = [
-  { name: 'LinkedIn',     pct: 42, count: 539, color: 'bg-blue-500' },
-  { name: 'Referrals',    pct: 22, count: 282, color: 'bg-green-500' },
-  { name: 'Careers Page', pct: 19, count: 244, color: 'bg-brand-500' },
-  { name: 'Indeed',       pct: 11, count: 141, color: 'bg-orange-500' },
-  { name: 'Other',        pct: 6,  count: 78,  color: 'bg-surface-400' },
+// weeklyTrend and sources are now loaded from the backend analytics API
+// These defaults are used only while data is loading.
+const EMPTY_WEEKLY: { day: string; apps: number; interviews: number }[] = [
+  { day: 'Mon', apps: 0, interviews: 0 },
+  { day: 'Tue', apps: 0, interviews: 0 },
+  { day: 'Wed', apps: 0, interviews: 0 },
+  { day: 'Thu', apps: 0, interviews: 0 },
+  { day: 'Fri', apps: 0, interviews: 0 },
+  { day: 'Sat', apps: 0, interviews: 0 },
+  { day: 'Sun', apps: 0, interviews: 0 },
 ]
 
 export default function AnalyticsPage() {
   const [range, setRange] = useState('30d')
   const [loading, setLoading] = useState(true)
   const [metricsData, setMetricsData] = useState<any>(null)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     const fetchMetrics = async () => {
         try {
             setLoading(true)
+            setError(null)
             const data = await analyticsApi.getMetrics(range)
             setMetricsData(data)
-        } catch (err) {
+        } catch (err: any) {
             console.error('Failed to fetch analytics metrics', err)
+            setError(err?.message || 'Failed to load analytics data.')
         } finally {
             setLoading(false)
         }
@@ -89,7 +95,7 @@ export default function AnalyticsPage() {
     fetchMetrics()
   }, [range])
 
-  if (loading || !metricsData) {
+  if (loading) {
       return (
           <div className="h-full min-h-[60vh] flex flex-col items-center justify-center gap-3">
               <Loader2 className="w-10 h-10 text-brand-600 animate-spin" />
@@ -98,7 +104,31 @@ export default function AnalyticsPage() {
       )
   }
 
-  const { kpis, pipeline, topJobs, topCandidates } = metricsData
+  if (error || !metricsData) {
+    return (
+      <div className="h-full min-h-[60vh] flex flex-col items-center justify-center gap-3 text-center p-6">
+        <BarChart2 className="w-12 h-12 text-surface-300" />
+        <h2 className="text-lg font-bold text-surface-700">Could not load analytics</h2>
+        <p className="text-surface-500 text-sm max-w-sm">{error || 'No data available yet.'}</p>
+        <button
+          onClick={() => { setLoading(true); analyticsApi.getMetrics(range).then(setMetricsData).catch((e: any) => setError(e.message)).finally(() => setLoading(false)) }}
+          className="mt-2 px-5 py-2.5 bg-brand-600 text-white text-sm font-semibold rounded-xl hover:bg-brand-700 transition-colors"
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
+
+  const { kpis, pipeline, topJobs, weeklyActivity, sourcingChannels } = metricsData
+  const weeklyTrend = (weeklyActivity && weeklyActivity.length > 0) ? weeklyActivity : EMPTY_WEEKLY
+  const sources = sourcingChannels || []
+  
+  // Calculate the maximum value across both apps and interviews for proper chart scaling
+  const maxVal = Math.max(
+    ...weeklyTrend.map((d: any) => Math.max(d.apps || 0, d.interviews || 0)), 
+    1
+  )
 
   const handleExport = () => {
     const headers = ['Metric', 'Value', 'Change']
@@ -205,20 +235,24 @@ export default function AnalyticsPage() {
         <div className="glass-card p-6">
           <h2 className="font-bold font-display text-surface-900 text-lg mb-1">Sourcing Channels</h2>
           <p className="text-sm text-surface-500 font-medium mb-6">Where candidates come from</p>
-          <div className="space-y-5">
-            {sources.map(s => (
-              <div key={s.name}>
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-sm font-semibold text-surface-800">{s.name}</span>
-                  <span className="text-sm font-bold text-surface-900">{s.count.toLocaleString()}</span>
+          {sources.length === 0 ? (
+            <p className="text-sm text-surface-400 italic text-center py-6">No applications yet — sourcing data will appear here.</p>
+          ) : (
+            <div className="space-y-5">
+              {sources.map((s: any) => (
+                <div key={s.name}>
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-sm font-semibold text-surface-800">{s.name}</span>
+                    <span className="text-sm font-bold text-surface-900">{s.count.toLocaleString()}</span>
+                  </div>
+                  <div className="h-2.5 bg-surface-100 rounded-full overflow-hidden">
+                    <div className={`h-full ${s.color} rounded-full`} style={{ width: `${s.pct}%` }} />
+                  </div>
+                  <div className="text-right text-[11px] font-bold text-surface-400 mt-1">{s.pct}%</div>
                 </div>
-                <div className="h-2.5 bg-surface-100 rounded-full overflow-hidden">
-                  <div className={`h-full ${s.color} rounded-full`} style={{ width: `${s.pct}%` }} />
-                </div>
-                <div className="text-right text-[11px] font-bold text-surface-400 mt-1">{s.pct}%</div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -240,15 +274,15 @@ export default function AnalyticsPage() {
           <div className="flex items-end gap-3 h-40">
             {weeklyTrend.map(d => (
               <div key={d.day} className="flex-1 flex flex-col items-center gap-1">
-                <div className="flex items-end gap-0.5 w-full">
+                <div className="flex items-end gap-0.5 w-full h-32">
                   <div
                     className="flex-1 bg-brand-500 rounded-t-lg transition-all"
-                    style={{ height: `${(d.apps / maxApps) * 130}px` }}
+                    style={{ height: `${(d.apps / maxVal) * 100}%` }}
                     title={`${d.apps} applications`}
                   />
                   <div
                     className="flex-1 bg-accent-400 rounded-t-lg transition-all"
-                    style={{ height: `${(d.interviews / maxApps) * 130}px` }}
+                    style={{ height: `${(d.interviews / maxVal) * 100}%` }}
                     title={`${d.interviews} interviews`}
                   />
                 </div>

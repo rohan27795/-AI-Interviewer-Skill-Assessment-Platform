@@ -10,49 +10,6 @@ import {
 } from 'lucide-react'
 import { getApiUrl } from '@/lib/api'
 
-const jobs = [
-  {
-    id: '1', title: 'Senior React Developer', department: 'Engineering',
-    location: 'Bangalore / Remote', type: 'Full-time', salary: '₹20-35 LPA',
-    applications: 47, shortlisted: 8, interviewed: 3,
-    status: 'active', posted: '5 days ago',
-    tags: ['React', 'TypeScript', 'Node.js'],
-    urgency: 'high',
-  },
-  {
-    id: '2', title: 'ML Engineer — NLP', department: 'AI/ML',
-    location: 'Mumbai / Hybrid', type: 'Full-time', salary: '₹25-45 LPA',
-    applications: 31, shortlisted: 5, interviewed: 2,
-    status: 'active', posted: '8 days ago',
-    tags: ['Python', 'PyTorch', 'NLP', 'LLM'],
-    urgency: 'medium',
-  },
-  {
-    id: '3', title: 'Product Manager — Growth', department: 'Product',
-    location: 'Delhi NCR', type: 'Full-time', salary: '₹18-30 LPA',
-    applications: 89, shortlisted: 12, interviewed: 6,
-    status: 'active', posted: '12 days ago',
-    tags: ['Product Strategy', 'Analytics', 'Agile'],
-    urgency: 'low',
-  },
-  {
-    id: '4', title: 'DevOps / Cloud Engineer', department: 'Infrastructure',
-    location: 'Remote', type: 'Full-time', salary: '₹22-38 LPA',
-    applications: 28, shortlisted: 4, interviewed: 1,
-    status: 'paused', posted: '15 days ago',
-    tags: ['AWS', 'Kubernetes', 'Terraform'],
-    urgency: 'medium',
-  },
-  {
-    id: '5', title: 'UX/UI Designer', department: 'Design',
-    location: 'Pune / Remote', type: 'Full-time', salary: '₹12-22 LPA',
-    applications: 53, shortlisted: 9, interviewed: 4,
-    status: 'active', posted: '18 days ago',
-    tags: ['Figma', 'User Research', 'Design Systems'],
-    urgency: 'low',
-  },
-]
-
 const urgencyConfig = {
   high: 'bg-red-50 text-red-600 border-red-200',
   medium: 'bg-amber-50 text-amber-600 border-amber-200',
@@ -69,9 +26,11 @@ export default function JobsPage() {
   useEffect(() => {
     const fetchJobs = async () => {
       try {
+        const token = localStorage.getItem('hireai_token')
         const API_URL = getApiUrl();
-        const response = await fetch(`${API_URL}/api/v1/jobs/?is_active=true`)
-        if (!response.ok) throw new Error('Failed to fetch jobs')
+        const response = await fetch(`${API_URL}/api/v1/jobs/?is_active=true`, {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        })
         const data = await response.json()
 
         const mappedJobs = data.map((j: any) => {

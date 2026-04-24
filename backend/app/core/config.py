@@ -2,7 +2,12 @@
 from typing import List, Optional
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+import os
+from pathlib import Path
+from dotenv import load_dotenv
 
+env_path = str(Path(__file__).resolve().parent.parent.parent / ".env")
+load_dotenv(dotenv_path=env_path, override=True)
 
 class Settings(BaseSettings):
     # App
@@ -58,6 +63,11 @@ class Settings(BaseSettings):
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
     SMTP_FROM_NAME: str = "HireAI"
+    
+    # Langfuse
+    LANGFUSE_SECRET_KEY: str = ""
+    LANGFUSE_PUBLIC_KEY: str = ""
+    LANGFUSE_HOST: str = "https://cloud.langfuse.com"
     
     # Interview Settings
     MATCH_THRESHOLD: float = 0.20  # Default to 20%

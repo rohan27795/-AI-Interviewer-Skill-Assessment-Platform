@@ -46,3 +46,4 @@ numpy>=1.26.2
 # Testing
 pytest==8.0.2
 pytest-asyncio==0.23.5
+langfuse>=2.0.0

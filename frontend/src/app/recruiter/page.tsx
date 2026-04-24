@@ -11,6 +11,7 @@ import {
 import { useSearchParams } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { analyticsApi } from '@/services/api'
+import { supabase } from '@/lib/supabaseClient'
 
 const statusConfig: Record<string, { label: string; bg: string; color: string }> = {
   shortlisted: { label: 'Shortlisted', bg: 'rgba(59,130,246,0.1)',  color: '#3b82f6' },
@@ -45,19 +46,48 @@ export default function RecruiterDashboard() {
   const [interviews, setInterviews] = useState<any[]>([])
 
   useEffect(() => {
+    let isMounted = true
+
     const fetchDashboard = async () => {
       try {
         const data: any = await analyticsApi.getDashboard()
-        setStats(data.stats || [])
-        setCandidates(data.recentCandidates || [])
-        setInterviews(data.upcomingInterviews || [])
+        if (isMounted) {
+          setStats(data.stats || [])
+          setCandidates(data.recentCandidates || [])
+          setInterviews(data.upcomingInterviews || [])
+        }
       } catch (err) {
-        console.error('Failed to fetch dashboard data', err)
+        if (isMounted) console.error('Failed to fetch dashboard data', err)
       } finally {
-        setLoading(false)
+        if (isMounted) setLoading(false)
       }
     }
+    
+    // Initial fetch
     fetchDashboard()
+
+    // Subscribe to realtime database changes on tables feeding the dashboard
+    const channel = supabase.channel('dashboard-metrics')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'applications' },
+        () => {
+          fetchDashboard()
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'interviews' },
+        () => {
+          fetchDashboard()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      isMounted = false
+      supabase.removeChannel(channel)
+    }
   }, [])
 
   const formattedDate = new Date().toLocaleDateString('en-GB', {
@@ -197,11 +227,11 @@ export default function RecruiterDashboard() {
           </div>
         </div>
 
-        {/* Today's Interviews */}
+        {/* Upcoming Interviews */}
         <div className="glass-card overflow-hidden flex flex-col" style={{ padding: 0 }}>
           <div className="flex items-center justify-between px-6 py-4 border-b"
             style={{ borderColor: 'rgba(255,255,255,0.5)' }}>
-            <h2 className="font-bold text-surface-900 font-display">Today's Interviews</h2>
+            <h2 className="font-bold text-surface-900 font-display">Upcoming Interviews</h2>
             <span className="text-xs font-bold px-2.5 py-1 rounded-full"
               style={{ background: 'rgba(99,102,241,0.12)', color: '#6366f1' }}>
               {filteredInterviews.length} scheduled
@@ -237,7 +267,7 @@ export default function RecruiterDashboard() {
             ) : (
               <div className="py-8 text-center flex-1 flex flex-col items-center justify-center text-surface-400">
                 <Video className="w-8 h-8 mb-2 opacity-50" />
-                <p className="text-xs font-semibold">No interviews scheduled today</p>
+                <p className="text-xs font-semibold">No upcoming interviews</p>
               </div>
             )}
             

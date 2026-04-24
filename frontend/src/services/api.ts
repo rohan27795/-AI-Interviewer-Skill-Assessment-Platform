@@ -135,6 +135,7 @@ export const assessmentsApi = {
 export const analyticsApi = {
   getDashboard: () => request('/api/v1/analytics/dashboard'),
   getMetrics: (range: string = '30d') => request(`/api/v1/analytics/metrics?range=${range}`),
+  getTalentPool: () => request('/api/v1/analytics/talent-pool'),
 }
 
 // ─── WebSocket Interview ─────────────────────────────────────

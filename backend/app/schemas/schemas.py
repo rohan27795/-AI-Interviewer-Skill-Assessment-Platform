@@ -190,14 +190,25 @@ class ApplicationResponse(BaseModel):
     id: str
     job_id: str
     candidate_id: str
-    resume_url: Optional[str]
-    parsed_data: Optional[ParsedResumeData]
+    resume_url: Optional[str] = None
+    parsed_data: Optional[ParsedResumeData] = None
     ai_score: Optional[float] = 0
-    status: ApplicationStatus
+    status: str  # keep as plain str to allow any status value from DB
     created_at: datetime
+    
+    # Joined fields from profiles
+    candidate_name: Optional[str] = None
+    candidate_phone: Optional[str] = None
+    
+    # Joined relation: applications → jobs
+    jobs: Optional[Dict[str, Any]] = None
+    
+    # Joined relation: applications → users
+    users: Optional[Dict[str, Any]] = None
 
     class Config:
         from_attributes = True
+        extra = "allow"  # pass through any extra joined fields
 
 
 class ApplyResponse(BaseModel):

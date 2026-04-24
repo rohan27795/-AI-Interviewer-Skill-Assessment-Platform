@@ -84,16 +84,33 @@ brain/
 
 # Project-specific excludes
 BRD_and_Architecture_Detailed.md
+BRD.md
+Architecture_Reference_Guide.md
+Project_Architecture_and_BRD.md
+aws_resume_context.md
+Demo_Presentation_Guide.md
 generate_resumes.py
 start_frontend.py
 backend/get_app.py
 backend/test_prompt.py
 backend/test_screening.py
+backend/test_openai.py
+backend/test_settings.py
 frontend/tsconfig.tsbuildinfo
 frontend/src/app/candidate/scorecard/demo/
+
+# Debug and temporary files
+debug_assessments.py
+debug_db.py
+debug_db.txt
+debug_interview.py
+debug_s3.py
+pdf_content.txt
+langfuse_guide.md.resolved
 
 # Unnecessary files for new repo
 Euron_AWS_Deployment_Bible_v1.0.docx.pdf
 backend/db/chroma.sqlite3
 walkthrough.md
+infra/terraform/tfplan
 

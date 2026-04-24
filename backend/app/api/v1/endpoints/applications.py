@@ -107,7 +107,7 @@ async def run_screening_pipeline(
             try:
                 # NOTE: Column is "embedding" in DB, not "requirements_embedding"
                 job = supabase.table("jobs").select(
-                    "description, requirements, experience_min"
+                    "title, description, requirements, experience_min"
                 ).eq("id", job_id).single().execute()
                 if job.data:
                     jd_data = job.data
@@ -169,6 +169,13 @@ async def run_screening_pipeline(
         # 6. Send interview invite if qualified
         if match_score >= settings.MATCH_THRESHOLD:
             try:
+                # Get job title for the email
+                job_title = jd_data.get("title") or "this role"
+                if not jd_data.get("title"):
+                    job_res = supabase.table("jobs").select("title").eq("id", job_id).single().execute()
+                    if job_res.data:
+                        job_title = job_res.data.get("title", "this role")
+
                 schedule_link = f"{settings.FRONTEND_URL}/candidate/schedule?app_id={application_id}"
                 log(f"Step 6: Sending invite to {candidate_email} (Score: {match_score})")
                 await send_interview_invite(
@@ -176,6 +183,7 @@ async def run_screening_pipeline(
                     candidate_name=candidate_name,
                     match_score=int(match_score * 100),
                     schedule_link=schedule_link,
+                    job_title=job_title,
                 )
                 log(f"Step 6 COMPLETE: Invite sent to {candidate_email}")
             except Exception as e:
@@ -264,11 +272,15 @@ async def apply_for_job(
                     detail=f"User registration failed: {e!s}",
                 ) from e
 
+    # ALWAYS update/sync profile name and phone from the latest application
+    try:
         supabase.table("profiles").upsert({
             "id": candidate_id,
             "full_name": candidate_name,
             "phone": candidate_phone,
         }).execute()
+    except Exception as e:
+        print(f"WARN: Failed to sync profile for {candidate_id}: {e}")
         
     # Check if using saved profile but profile has no resume
     saved_resume_url = None
@@ -361,12 +373,19 @@ async def apply_for_job(
         import traceback
         traceback.print_exc()
     
+    # Fetch final updated data
+    final_row = supabase.table("applications").select("ai_score, status").eq("id", application_id).single().execute()
+    final_score = final_row.data.get("ai_score") or 0.0
+    final_status = final_row.data.get("status") or ApplicationStatus.APPLIED
+    
+    is_invited = final_score >= settings.MATCH_THRESHOLD
+    
     return ApplyResponse(
         application_id=application_id,
-        ai_score=0.0,
-        status=ApplicationStatus.APPLIED,
+        ai_score=final_score,
+        status=final_status,
         message="Application submitted successfully.",
-        interview_invited=False,
+        interview_invited=is_invited,
     )
 
 
@@ -374,7 +393,7 @@ async def apply_for_job(
 async def get_application_status(application_id: str):
     """Poll application status."""
     supabase = get_supabase()
-    result = supabase.table("applications").select("*").eq("id", application_id).single().execute()
+    result = supabase.table("applications").select("*, jobs(title)").eq("id", application_id).single().execute()
     if not result.data:
         raise HTTPException(status_code=404, detail="Application not found.")
     
@@ -402,17 +421,67 @@ async def list_applications(
         if not job_ids:
             return []
             
-        query = supabase.table("applications").select("*, jobs(title, location), users(name, email, phone)").in_("job_id", job_ids)
+        query = supabase.table("applications").select("*, jobs(title, location), users(email)").in_("job_id", job_ids)
     else:
-        query = supabase.table("applications").select("*, jobs(title, location), users(name, email, phone)")
+        query = supabase.table("applications").select("*, jobs(title, location), users(email)")
     
     if job_id: query = query.eq("job_id", job_id)
     if status: query = query.eq("status", status)
     
     result = query.order("created_at", desc=True).execute()
     apps = result.data
+    
+    # 1. Fetch all assessment IDs for these applications to ensure status sync
+    app_ids = [a["id"] for a in apps] if apps else []
+    if app_ids:
+        # Check assessments table for any assessments linked to these application IDs (via interviews)
+        assessments_res = supabase.table("assessments").select("interview_id, interviews(application_id)").execute()
+        interviewed_app_ids = set()
+        for ass in (assessments_res.data or []):
+            inter = ass.get("interviews")
+            if inter and inter.get("application_id") in app_ids:
+                interviewed_app_ids.add(inter["application_id"])
+    else:
+        interviewed_app_ids = set()
+
+    # Enrich with candidate full_name from profiles
+    candidate_ids = list({a["candidate_id"] for a in apps if a.get("candidate_id")})
+    profiles_map = {}
+    if candidate_ids:
+        profiles_res = supabase.table("profiles").select("id, full_name, phone").in_("id", candidate_ids).execute()
+        profiles_map = {p["id"]: p for p in profiles_res.data}
+    
     for app in apps:
         app["resume_url"] = generate_presigned_url_if_s3(app.get("resume_url"))
+        cid = app.get("candidate_id")
+        profile = profiles_map.get(cid, {})
+        
+        # Override status to 'interviewed' if an assessment exists but DB status is lagging
+        if app.get("id") in interviewed_app_ids and app.get("status") in ("applied", "screening", "invited", "scheduled", "interviewing"):
+            app["status"] = "interviewed"
+
+        # ── Standardized Name Resolution ──
+        parsed = app.get("parsed_data") or {}
+        resume_name = parsed.get("name", "").strip() if isinstance(parsed, dict) else ""
+        profile_name = profile.get("full_name", "").strip() or ""
+        email_prefix = (app.get("users") or {}).get("email", "").split("@")[0].replace(".", " ").title()
+        
+        final_name = "Candidate"
+        if resume_name and len(resume_name) > 1:
+            final_name = resume_name
+        elif profile_name and profile_name.lower() not in ("daya", "mock", "test"):
+            final_name = profile_name
+        elif email_prefix:
+            final_name = email_prefix
+            
+        # CamelCase fix if needed
+        if " " not in final_name and any(c.isupper() for c in final_name[1:]):
+            import re
+            final_name = re.sub(r'(?<!^)(?=[A-Z])', ' ', final_name).strip()
+
+        app["candidate_name"] = final_name
+        app["candidate_phone"] = profile.get("phone") or ""
+    
     return apps
 
 

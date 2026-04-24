@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.core.database import get_supabase, get_pg_pool, get_redis
 from app.schemas.schemas import ParsedResumeData
 import logging
+from langfuse import observe
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,7 @@ class ResumeParserService:
         else:
             raise ValueError(f"Unsupported file format: {ext}")
 
+    @observe()
     async def parse_resume(self, resume_text: str) -> ParsedResumeData:
         """Use GPT-4o to extract structured data from resume text."""
         prompt = RESUME_EXTRACTION_PROMPT.format(resume_text=resume_text[:8000])

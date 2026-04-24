@@ -29,6 +29,7 @@ function CandidateDashboardInner() {
   const fetchDashboardData = async () => {
     try {
       if (!token) return
+      setLoading(true)
 
       const API_URL = getApiUrl()
       // Fetch Profile
@@ -47,10 +48,15 @@ function CandidateDashboardInner() {
       })
       setApplications(appsRes.data)
 
-    } catch (err) {
-      console.error(err)
-      toast.error('Failed to load profile. Please log in again.')
-      logout()
+    } catch (err: any) {
+      console.error('Dashboard Fetch Error:', err)
+      // If it's a 401, then the token is truly dead
+      if (err.response?.status === 401) {
+        toast.error('Session expired. Please log in again.')
+        logout()
+      } else {
+        toast.error('Failed to load some dashboard data. Please try refreshing.')
+      }
     } finally {
       setLoading(false)
     }
@@ -394,13 +400,7 @@ function CandidateDashboardInner() {
                         <div className="w-10 h-10 bg-brand-50 border border-brand-100 rounded-xl flex items-center justify-center">
                            <Briefcase className="w-5 h-5 text-brand-600" />
                         </div>
-                        <div className={`px-2.5 py-1 rounded-lg text-[10px] font-black tracking-widest uppercase flex items-center gap-1 ${
-                          job.isOfficialScore 
-                            ? 'bg-green-50 text-green-700 border border-green-100' 
-                            : 'bg-brand-50 text-brand-700 border border-brand-100'
-                        }`}>
-                          <Sparkles className="w-3 h-3" /> {job.matchPercentage}% {job.isOfficialScore ? 'AI Match' : 'Estimated Match'}
-                        </div>
+                        {/* Match Indicator Removed */}
                       </div>
                       <h4 className="font-bold text-surface-900 mb-1 group-hover:text-brand-600 transition-colors">{job.title}</h4>
                       <p className="text-xs text-surface-500 font-medium mb-4 flex items-center gap-1.5"><MapPin className="w-3 h-3" /> {job.location || 'Remote'}</p>

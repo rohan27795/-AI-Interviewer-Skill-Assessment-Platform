@@ -50,15 +50,36 @@ async def _send_resend_email(to_email: str, subject: str, html_body: str) -> boo
         return False
 
 
+def _get_display_name(full_name: str) -> str:
+    """Extract first name for friendly greetings (e.g. 'Ashish' from 'Ashish Kumar')."""
+    if not full_name:
+        return "Candidate"
+    
+    # Handle CamelCase names with no spaces (e.g. "HaydenSmith" -> "Hayden Smith")
+    # This ensures "HaydenSmith" becomes "Hayden" in greetings.
+    processed_name = full_name.strip()
+    if " " not in processed_name:
+        import re
+        # Insert space before capital letters (except the first one)
+        processed_name = re.sub(r'(?<!^)(?=[A-Z])', ' ', processed_name)
+    
+    parts = processed_name.split()
+    if parts:
+        return parts[0].strip()
+    return "Candidate"
+
+
 # ─── 1. Interview Scheduling Invite ──────────────────────────────────────────
 async def send_interview_invite(
     to_email: str,
     candidate_name: str,
     match_score: int,
     schedule_link: str,
+    job_title: str = "this role",
 ) -> bool:
     """Send shortlisted + scheduling invite to candidate."""
     print(f"📧 Building invite for {candidate_name} ({to_email})")
+    first_name = _get_display_name(candidate_name)
 
     html_body = f"""<!DOCTYPE html>
 <html lang="en">
@@ -77,8 +98,8 @@ async def send_interview_invite(
           <tr>
             <td style="background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 60%,#a855f7 100%);padding:40px 40px 32px;text-align:center;">
               <div style="display:inline-block;width:56px;height:56px;background:rgba(255,255,255,0.18);border-radius:14px;line-height:56px;font-size:28px;margin-bottom:18px;">&#127881;</div>
-              <h1 style="color:#ffffff;margin:0 0 8px;font-size:26px;font-weight:700;letter-spacing:-0.5px;line-height:1.2;">Congratulations, {candidate_name}!</h1>
-              <p style="color:rgba(255,255,255,0.85);margin:0;font-size:15px;font-weight:400;">You have been shortlisted for an AI-powered interview</p>
+              <h1 style="color:#ffffff;margin:0 0 8px;font-size:26px;font-weight:700;letter-spacing:-0.5px;line-height:1.2;">Congratulations, {first_name}!</h1>
+              <p style="color:rgba(255,255,255,0.85);margin:0;font-size:15px;font-weight:400;">You have been shortlisted for {job_title}</p>
             </td>
           </tr>
 
@@ -201,6 +222,7 @@ async def send_calendar_invite(
 ) -> bool:
     """Send interview confirmation with date, time, and direct room link."""
     print(f"📧 Building calendar invite for {candidate_name} ({to_email})")
+    first_name = _get_display_name(candidate_name)
     formatted_date = scheduled_at.strftime("%A, %B %d, %Y")
     formatted_time = scheduled_at.strftime("%I:%M %p IST")
     full_link = f"{settings.FRONTEND_URL}{interview_link}"
@@ -231,7 +253,7 @@ async def send_calendar_invite(
           <tr>
             <td style="padding:36px 40px 32px;">
               <p style="color:#334155;font-size:15px;line-height:1.75;margin:0 0 28px;">
-                Hi <strong>{candidate_name}</strong>, your interview has been confirmed! Here are your details:
+                Hi <strong>{first_name}</strong>, your interview has been confirmed! Here are your details:
               </p>
 
               <!-- DETAILS TABLE -->

@@ -40,8 +40,9 @@ function AuthCallbackContent() {
 
         toast.success('Successfully logged in!')
         
-        // Redirect based on role
-        if (role === 'recruiter') {
+        // Redirect based on the actual user role returned by the server
+        const dbRole = res.data.user?.role || 'candidate'
+        if (dbRole === 'recruiter' || dbRole === 'admin') {
           router.push('/recruiter/jobs')
         } else {
           router.push('/candidate/dashboard')

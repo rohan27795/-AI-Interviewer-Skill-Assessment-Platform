@@ -18,10 +18,24 @@ from app.schemas.schemas import HireVerdict, InterviewStatus, ApplicationStatus
 from app.services.email_service import send_assessment_ready, send_candidate_scorecard_email
 import logging
 import asyncio
+from langfuse import observe
 
 logger = logging.getLogger(__name__)
 
 client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+
+
+# ── Dimension weights for overall_score ───────────────────────────────────────
+# Weights reflect importance of each assessment dimension.
+# If a round didn't happen (score is null), its weight is redistributed
+# proportionally among the dimensions that *were* scored.
+DIMENSION_WEIGHTS: dict = {
+    "technical_score":      0.30,  # Hardest to fake — most predictive of job performance
+    "problem_solving_score": 0.25, # Closely tied to technical depth
+    "behavioral_score":     0.20,  # Cultural & leadership signals
+    "communication_score":  0.15,  # Always scorable if candidate spoke
+    "cultural_fit_score":   0.10,  # Softest signal — lowest weight
+}
 
 
 # ── Prompt template ───────────────────────────────────────────────────────────
@@ -29,18 +43,28 @@ client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 ASSESSMENT_PROMPT = """
 You are an expert talent assessment AI. Analyze the ACTUAL interview transcript below.
 
-CRITICAL RULES — READ BEFORE SCORING:
-1. Only score dimensions that are supported by the transcript content.
-2. If a round did NOT occur (no transcript turns for it), set its score to null.
-3. Do NOT fabricate scores for rounds or dimensions with no evidence.
-4. The "rounds_conducted" field tells you which rounds actually happened.
-5. If total_turns < 4, the interview was too short for a reliable technical/behavioral assessment.
-6. The termination_reason tells you WHY the interview ended.
+CRITICAL RULES — VIOLATION OF THESE = INVALID ASSESSMENT:
+1. Only score dimensions supported by the transcript. If in doubt, use null.
+2. null means "not enough evidence to score" — use it freely and honestly.
+3. NEVER assign 50 as a default score. 50 is not a valid fallback. If you cannot score it, use null.
+4. Do NOT fabricate scores, strengths, or insights not directly evidenced in the transcript.
+5. If a round did NOT occur (no transcript turns for it), set its score to null.
+6. If total_turns < 6, the interview is too short. Set all skill scores to null and overall_score to null.
+7. The termination_reason tells you WHY the interview ended — factor it into all narrative fields.
+
+Minimum evidence required before scoring each dimension:
+- technical_score: must have at least 5 candidate turns in the technical round with substantive answers
+- behavioral_score: must have at least 3 candidate turns in the behavioral round
+- communication_score: must have at least 4 total candidate turns across any rounds
+- cultural_fit_score: must have evidence of values / team-fit discussion (intro or behavioral round)
+- problem_solving_score: requires technical round with problem-solving discussion
 
 Job Title: {job_title}
 Candidate Name: {candidate_name}
 Interview Duration: {duration} minutes
 Total Transcript Turns: {total_turns}
+Candidate Response Turns: {candidate_turns}
+AI Question Turns: {ai_turns}
 Rounds Actually Conducted: {rounds_conducted}
 Termination Reason: {termination_reason}
 
@@ -56,25 +80,25 @@ Raw Proctoring JSON:
 Generate a JSON assessment with this EXACT schema. Use null for any dimension you cannot score from evidence:
 {{
   "overall_score": float (0-100) or null if insufficient data,
-  "technical_score": float (0-100) or null if technical round not conducted,
-  "behavioral_score": float (0-100) or null if behavioral round not conducted,
-  "communication_score": float (0-100) if any speech occurred, else null,
+  "technical_score": float (0-100) or null if technical round not conducted or insufficient evidence,
+  "behavioral_score": float (0-100) or null if behavioral round not conducted or insufficient evidence,
+  "communication_score": float (0-100) if enough speech occurred (4+ candidate turns), else null,
   "cultural_fit_score": float (0-100) or null if behavioral/intro insufficient,
-  "problem_solving_score": float (0-100) or null if technical round not conducted,
+  "problem_solving_score": float (0-100) or null if technical round not conducted or insufficient evidence,
 
   "completion_status": "completed" | "early_exit" | "tab_guard",
   "rounds_completed": list of round names that had content,
   "total_turns_assessed": integer,
 
   "verdict": "strong_hire" | "hire" | "no_hire" | "strong_no_hire",
-  "verdict_reasoning": "Evidence-only. Acknowledge if interview was cut short or terminated. No flattery.",
+  "verdict_reasoning": "Evidence-only 2-3 sentences. Be direct about interview completeness. No flattery.",
 
-  "key_strengths": ["Only list strengths with transcript evidence. Empty list if insufficient."],
-  "areas_of_improvement": ["Concrete gaps. Note if assessment is incomplete due to short interview."],
+  "key_strengths": ["Only list strengths with explicit transcript evidence. Empty list [] if insufficient."],
+  "areas_of_improvement": ["Concrete gaps observed. Note if assessment is incomplete due to short interview."],
 
-  "technical_highlights": ["Only if technical round occurred"],
-  "technical_concerns": ["Only if technical round occurred"],
-  "behavioral_highlights": ["Only if behavioral round occurred"],
+  "technical_highlights": ["Only if technical round occurred with enough evidence"],
+  "technical_concerns": ["Only if technical round occurred with enough evidence"],
+  "behavioral_highlights": ["Only if behavioral round occurred with enough evidence"],
 
   "expected_salary": integer (INR) or null,
   "negotiated_salary": integer (INR) or null,
@@ -99,14 +123,16 @@ Generate a JSON assessment with this EXACT schema. Use null for any dimension yo
     }}
   ],
 
-  "hiring_recommendation": "paragraph for recruiter — honest about interview completeness",
+  "hiring_recommendation": "1-2 honest paragraph for recruiter — be direct about interview completeness and data quality",
   "suggested_onboarding_notes": "string or empty if insufficient data"
 }}
 
-Scoring rules:
-- Scores must reflect ONLY evidence from the provided transcript.
+Scoring rules (STRICTLY ENFORCED):
+- Scores must reflect ONLY evidence from the provided transcript. No guessing.
+- DO NOT use 50 as a default. If uncertain, use null.
 - Tab guard termination → integrity_score <= 30, final_security_verdict = "major_violations", verdict = "no_hire" or "strong_no_hire".
-- Early exit with < 4 turns → overall_score <= 40 max, note incompleteness in hiring_recommendation.
+- Early exit with < 6 total turns → all skill scores = null, overall_score = null.
+- Short interviews (6-14 turns) → scores must be conservative (no score above 65 without clear evidence).
 - Return ONLY valid JSON.
 """
 
@@ -210,6 +236,7 @@ def _format_proctoring_for_llm(logs: List[Dict]) -> Tuple[str, str]:
 class AssessmentGeneratorService:
     """Generates post-interview assessments using GPT-4o analysis."""
 
+    @observe()
     async def generate_assessment(
         self,
         interview_id: str,
@@ -238,8 +265,16 @@ class AssessmentGeneratorService:
                 interview_id, transcript, proctoring_logs, analysis, job_data, resume_data
             )
 
-        # ── Insufficient data: < 3 total conversation turns ───────────────────
-        if total_turns < 3:
+        # ── Insufficient data: too few conversation turns ──────────────────────
+        # We check total turns but also consider if AI spoke enough (candidate
+        # transcript was previously broken so we can't gate solely on candidate turns)
+        ai_turns = analysis["ai_turns"]
+        candidate_turns = analysis["candidate_turns"]
+        # Minimum viable: AI must have spoken at least 3 times (= 3 questions asked)
+        # If candidate turns are 0 but AI spoke >= 3 times, something went wrong with
+        # transcription — still attempt LLM scoring rather than giving 0/100
+        insufficient = total_turns < 4 or (ai_turns < 3 and candidate_turns < 2)
+        if insufficient:
             return self._insufficient_data_assessment(
                 interview_id, transcript, proctoring_logs, analysis, job_data, resume_data,
                 termination_reason
@@ -254,6 +289,8 @@ class AssessmentGeneratorService:
             candidate_name=(resume_data.get("name") if isinstance(resume_data, dict) else None) or "Candidate",
             duration=duration_minutes,
             total_turns=total_turns,
+            candidate_turns=candidate_turns,
+            ai_turns=ai_turns,
             rounds_conducted=", ".join(rounds_conducted) if rounds_conducted else "none",
             termination_reason=termination_reason,
             transcript=formatted_transcript[:12000],
@@ -297,19 +334,32 @@ class AssessmentGeneratorService:
                 assessment["behavioral_score"] = None
                 assessment["cultural_fit_score"] = None
 
-            # Normalize overall_score from non-null dimension scores
-            scored_dims = [
-                assessment.get(k) for k in score_keys[1:]  # skip overall
-                if assessment.get(k) is not None
-            ]
-            if scored_dims:
-                assessment["overall_score"] = round(sum(scored_dims) / len(scored_dims), 1)
+            # ── Weighted overall_score (renormalized over scored dims only) ──
+            # Only include dimensions where a score exists (round actually occurred).
+            # Remaining weights are proportionally redistributed so total = 1.0.
+            weighted_sum = 0.0
+            total_weight = 0.0
+            for dim, w in DIMENSION_WEIGHTS.items():
+                val = assessment.get(dim)
+                if val is not None:
+                    weighted_sum += float(val) * w
+                    total_weight += w
+
+            if total_weight > 0:
+                # Renormalize: divide by actual total weight (not 1.0) so
+                # missing dimensions don't drag the score toward 0.
+                assessment["overall_score"] = round(weighted_sum / total_weight, 1)
             else:
                 assessment["overall_score"] = 0.0
 
-            # Cap overall for early_exit
-            if termination_reason == "early_exit" and assessment["overall_score"] > 40:
-                assessment["overall_score"] = min(assessment["overall_score"], 40.0)
+            # Cap overall for early_exit based on how many rounds were completed
+            # 0 rounds = max 20, 1 round = max 35, 2 rounds = max 55, 3 rounds = max 75, 4 = no cap
+            if termination_reason == "early_exit":
+                rounds_done_count = len(rounds_conducted)
+                round_caps = {0: 20.0, 1: 35.0, 2: 55.0, 3: 75.0}
+                cap = round_caps.get(rounds_done_count, 100.0)
+                if assessment["overall_score"] is not None:
+                    assessment["overall_score"] = min(float(assessment["overall_score"]), cap)
 
             # Normalize security_report
             sr = assessment.get("security_report")
@@ -737,14 +787,14 @@ async def generate_assessment(
         # 6. Update application status
         app_id = application.get("id") or data.get("application_id")
         if app_id:
-            for status_val in (ApplicationStatus.INTERVIEWED.value, ApplicationStatus.SCREENING.value):
-                try:
-                    supabase.table("applications").update(
-                        {"status": status_val}
-                    ).eq("id", app_id).execute()
-                    break
-                except Exception:
-                    continue
+            try:
+                # Force status to 'interviewed'
+                supabase.table("applications").update(
+                    {"status": ApplicationStatus.INTERVIEWED.value}
+                ).eq("id", app_id).execute()
+                logger.info(f"[Assessment] Updated application {app_id} to status 'interviewed'")
+            except Exception as e:
+                logger.warning(f"[Assessment] Failed to update application {app_id} status: {e}")
 
         # 7. Notify recruiter
         recruiter_email = recruiter.get("email")
