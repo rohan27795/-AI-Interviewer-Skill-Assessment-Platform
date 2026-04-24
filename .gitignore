@@ -91,6 +91,9 @@ aws_resume_context.md
 Demo_Presentation_Guide.md
 generate_resumes.py
 start_frontend.py
+start_all.py
+start_backend.py
+high_level.py
 backend/get_app.py
 backend/test_prompt.py
 backend/test_screening.py
