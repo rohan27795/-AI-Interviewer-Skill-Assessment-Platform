@@ -72,6 +72,81 @@ async def get_assessment(
     return JSONResponse(content=_enrich_from_detailed_report(row))
 
 
+@router.post("/{interview_id}/regenerate")
+async def regenerate_assessment(
+    interview_id: str,
+    request: Request,
+):
+    """
+    Delete the existing assessment and re-generate from the DB-stored transcript.
+    Use this when a prior assessment was generated from a broken session.
+    """
+    supabase = get_supabase()
+
+    # 1. Delete existing assessment (if any)
+    try:
+        await asyncio.to_thread(
+            lambda: supabase.table("assessments")
+            .delete()
+            .eq("interview_id", interview_id)
+            .execute()
+        )
+        logger.info(f"[Regenerate] Deleted existing assessment for {interview_id}")
+    except Exception as e:
+        logger.warning(f"[Regenerate] No existing assessment to delete: {e}")
+
+    # 2. Fetch interview data to get the persisted transcript
+    try:
+        res = await asyncio.to_thread(
+            lambda: supabase.table("interviews")
+            .select("*, applications(*, jobs(*), users(*))")
+            .eq("id", interview_id)
+            .single()
+            .execute()
+        )
+        interview_data = res.data if res else None
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+    if not interview_data:
+        raise HTTPException(status_code=404, detail="Interview not found.")
+
+    transcript = interview_data.get("transcript") or []
+    if isinstance(transcript, str):
+        import json as _json
+        try:
+            transcript = _json.loads(transcript)
+        except Exception:
+            transcript = []
+
+    proctoring_logs = interview_data.get("proctoring_logs") or []
+    if isinstance(proctoring_logs, str):
+        import json as _json
+        try:
+            proctoring_logs = _json.loads(proctoring_logs)
+        except Exception:
+            proctoring_logs = []
+
+    # 3. Trigger regeneration
+    from app.services.assessment_generator import generate_assessment
+    asyncio.create_task(
+        generate_assessment(
+            interview_id,
+            transcript,
+            proctoring_logs,
+            termination_reason="early_exit",  # re-assess as early exit
+        )
+    )
+
+    return JSONResponse(content={
+        "success": True,
+        "message": f"Assessment regeneration triggered for {interview_id}. "
+                   f"Transcript has {len(transcript)} turns. "
+                   "Refresh the scorecard page in ~30 seconds.",
+        "transcript_turns": len(transcript),
+    })
+
+
 @router.get("/", response_model=list[AssessmentResponse])
 async def list_assessments(
     job_id: str = None,

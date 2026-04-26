@@ -326,18 +326,19 @@ def _build_session_config(state_machine: InterviewStateMachine) -> Dict[str, Any
             "voice": "alloy",
             "input_audio_format": "pcm16",
             "output_audio_format": "pcm16",
-            # IMPORTANT: only 'model' is a valid field here.
-            # Adding 'language' or other unknown fields silently breaks Whisper transcription.
+            # IMPORTANT: only 'model' is a valid field here for the Realtime API.
+            # Adding extra fields silently breaks Whisper transcription.
+            # English is enforced via the system prompt instead.
             "input_audio_transcription": {
                 "model": "whisper-1",
             },
             "turn_detection": {
                 "type": "server_vad",
-                "threshold": 0.5,
+                "threshold": 0.8,  # Increased from 0.5 to avoid triggering on background noise/breaths
                 "prefix_padding_ms": 300,
-                "silence_duration_ms": 700,
+                "silence_duration_ms": 1200,  # Increased to prevent cutting off candidate mid-thought
             },
-            "temperature": 0.4,
+            "temperature": 0.6,  # OpenAI Realtime API minimum is 0.6
             "max_response_output_tokens": 350,
         },
     }
@@ -357,24 +358,39 @@ async def realtime_interview(
     The browser sends raw PCM16 audio chunks; this endpoint proxies them
     to OpenAI which returns streamed PCM16 audio + live transcript events.
     """
+    import sys
+    def _log(msg: str):
+        """Unbuffered log to stderr + debug file."""
+        line = f"[{datetime.utcnow().isoformat()}] {interview_id}: {msg}"
+        sys.stderr.write(line + "\n")
+        sys.stderr.flush()
+        with open("proxy_debug.log", "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+
+    _log(">>> WebSocket handler entered")
     await websocket.accept()
+    _log(">>> WebSocket accepted")
     session = RealtimeInterviewSession(interview_id, websocket)
 
     def log_error(msg_str: str):
+        _log(f"ERROR: {msg_str}")
         with open("proxy_debug.log", "a", encoding="utf-8") as f:
-            f.write(f"[{datetime.utcnow().isoformat()}] {interview_id}: {msg_str}\n")
             traceback.print_exc(file=f)
             
     try:
+        _log("Initializing session...")
         await session.initialize()
+        _log("Session initialized OK")
     except Exception as e:
         log_error(f"Init failed: {e}")
+        traceback.print_exc()
         await websocket.send_json({"type": "error", "data": {"message": str(e)}})
         await websocket.close()
         return
 
     # Connect to OpenAI Realtime API
     try:
+        _log("Connecting to OpenAI Realtime API...")
         openai_ws = await websockets.connect(
             REALTIME_URL,
             additional_headers=OPENAI_HEADERS,
@@ -382,6 +398,7 @@ async def realtime_interview(
         )
     except Exception as e:
         log_error(f"OpenAI WS connect failed: {e}")
+        traceback.print_exc()
         await websocket.send_json({
             "type": "error",
             "data": {"message": "Cannot connect to AI service. Please try again."},
@@ -389,16 +406,18 @@ async def realtime_interview(
         await websocket.close()
         return
 
-    print(f"[Realtime] Session {interview_id} — connected to OpenAI Realtime API")
+    _log("Connected to OpenAI Realtime API")
 
     # Build kickoff details (will be sent after session.updated confirms our config)
     candidate_name = session.state_machine.resume_data.get("name", "Candidate")
     job_title = (session.state_machine.job_data.get("title") or "this role").strip()
     kickoff_instruction = (
         f"The candidate ({candidate_name}) just joined for the interview for: {job_title}. "
-        "Speak now as HireAI: greet them by name, briefly confirm you already have their parsed resume and "
+        "You MUST speak ONLY in English for the entire interview. "
+        "Speak now as HireAI: greet them by name in English, briefly confirm you already have their parsed resume and "
         "application on file for this role, and ask one short question about what drew them to the role. "
-        "Do not ask them to upload or resend a resume, and do not ask for a phone number for routine verification."
+        "Do not ask them to upload or resend a resume, and do not ask for a phone number for routine verification. "
+        "If the candidate speaks in any language other than English, politely ask them to respond in English."
     )
 
     # Task flags
@@ -508,7 +527,7 @@ async def realtime_interview(
 
                 # Log every event except high-frequency audio chunks
                 if event_type not in ("response.audio.delta", "response.output_audio.delta"):
-                    print(f"[Realtime][{interview_id}] ← {event_type}")
+                    print(f"[Realtime][{interview_id}] <- {event_type}")
                     log_error(f"EVENT: {event_type} | data: {json.dumps(event)[:300]}")
 
                 # ── Session ready: send our config ─────────────────────────
@@ -652,11 +671,11 @@ async def realtime_interview(
                         pass
 
         except websockets.exceptions.ConnectionClosed as e:
-            text = f"openai→browser ConnectionClosed: {e.code} / {e.reason}"
+            text = f"openai->browser ConnectionClosed: {e.code} / {e.reason}"
             print(f"[Realtime] {text}")
             log_error(text)
         except Exception as e:
-            text = f"openai→browser loop error: {e}"
+            text = f"openai->browser loop error: {e}"
             print(f"[Realtime] {text}")
             log_error(text)
 

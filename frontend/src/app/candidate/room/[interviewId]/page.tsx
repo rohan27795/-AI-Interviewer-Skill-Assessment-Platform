@@ -113,6 +113,9 @@ export default function InterviewRoom({ params }: { params: { interviewId: strin
   // PCM16 playback state (Realtime API sends PCM16 at 24kHz)
   const scheduledTimeRef = useRef(0)        // next audio chunk schedule time
 
+  // Track active audio sources so we can stop them on barge-in
+  const activeSourcesRef = useRef<AudioBufferSourceNode[]>([])
+
   // ── PCM16 playback via AudioContext (OpenAI Realtime sends PCM16 at 24kHz) ──
   const playPCM16Chunk = (base64Pcm: string) => {
     const ctx = audioContextRef.current
@@ -148,13 +151,18 @@ export default function InterviewRoom({ params }: { params: { interviewId: strin
     source.start(startAt)
     scheduledTimeRef.current = startAt + buffer.duration
 
+    // Track this source for barge-in cancellation
+    activeSourcesRef.current.push(source)
+
     // Mark AI as speaking
     setAiSpeaking(true)
     aiSpeakingRef.current = true
 
     source.onended = () => {
+      // Remove from active sources
+      activeSourcesRef.current = activeSourcesRef.current.filter(s => s !== source)
       // Only clear speaking state when all scheduled audio has played
-      if (ctx.currentTime >= scheduledTimeRef.current - 0.05) {
+      if (activeSourcesRef.current.length === 0) {
         setAiSpeaking(false)
         aiSpeakingRef.current = false
       }
@@ -197,16 +205,34 @@ export default function InterviewRoom({ params }: { params: { interviewId: strin
           if (chunk) playPCM16Chunk(chunk)
 
         } else if (t === 'response.done') {
-          // AI finished speaking — schedule mic re-enable with slight delay
+          // AI finished speaking — clear state once buffered audio drains
           const remaining = Math.max(0, (scheduledTimeRef.current - (audioContextRef.current?.currentTime ?? 0)) * 1000)
-          setTimeout(() => {
+          if (remaining <= 50) {
+            // No audio buffered, clear immediately
             setAiSpeaking(false)
             aiSpeakingRef.current = false
-          }, remaining + 300)
+          } else {
+            setTimeout(() => {
+              setAiSpeaking(false)
+              aiSpeakingRef.current = false
+            }, remaining + 100)
+          }
 
         } else if (t === 'speech_started') {
-          // VAD detected candidate started speaking
+          // VAD detected candidate started speaking — STOP AI audio immediately
+          // This is critical for two reasons:
+          // 1. Natural barge-in: the AI should stop talking when the candidate speaks
+          // 2. Clean mic capture: AI audio from speakers would echo into the mic,
+          //    corrupting the candidate's audio and causing Whisper transcription to fail
           setCandidateSpeaking(true)
+          // Stop all queued AI audio playback
+          activeSourcesRef.current.forEach(s => { try { s.stop() } catch {} })
+          activeSourcesRef.current = []
+          if (audioContextRef.current) {
+            scheduledTimeRef.current = audioContextRef.current.currentTime
+          }
+          setAiSpeaking(false)
+          aiSpeakingRef.current = false
 
         } else if (t === 'speech_stopped') {
           // VAD detected candidate stopped — keep indicator until transcript arrives
@@ -310,9 +336,12 @@ export default function InterviewRoom({ params }: { params: { interviewId: strin
       workletNode.port.onmessage = (e) => {
         if (!micOnRef.current) return  // user explicitly muted mic
         
-        // CRITICAL: Suppress mic input while AI is speaking to prevent echo loops.
-        // This stops the AI from "hearing itself" and responding to its own voice.
-        if (aiSpeakingRef.current) return
+        // NOTE: We rely on the browser's built-in echoCancellation (enabled in
+        // getUserMedia constraints) to prevent the AI from hearing itself.
+        // Previously, all mic audio was dropped while aiSpeakingRef was true,
+        // which caused the candidate's transcript to be empty. The browser's
+        // AEC handles echo suppression at the hardware level, and OpenAI's
+        // server-side VAD handles turn detection, so we always send audio.
 
         const ws = socketRef.current
         if (ws?.readyState === WebSocket.OPEN) {
@@ -342,6 +371,9 @@ export default function InterviewRoom({ params }: { params: { interviewId: strin
 
   /** Stop AI speech and clear scheduled audio */
   const stopAISpeech = () => {
+    // Stop all actively playing audio sources
+    activeSourcesRef.current.forEach(s => { try { s.stop() } catch {} })
+    activeSourcesRef.current = []
     if (audioContextRef.current) {
       scheduledTimeRef.current = audioContextRef.current.currentTime
     }

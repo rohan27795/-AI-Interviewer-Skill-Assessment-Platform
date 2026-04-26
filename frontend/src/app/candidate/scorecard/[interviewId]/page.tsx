@@ -7,7 +7,7 @@ import {
   CheckCircle, TrendingUp, Loader2, Brain,
   Briefcase, Clock, Home, ChevronRight,
   Star, ArrowRight, Sparkles, AlertCircle,
-  AlertTriangle, Award, MessageSquare, Target, Zap
+  AlertTriangle, Award, MessageSquare, Target, Zap, RefreshCw
 } from 'lucide-react'
 import { getApiUrl } from '@/lib/api'
 
@@ -161,6 +161,7 @@ export default function CandidateScorecardPage({ params }: { params: { interview
   const [pollingCount, setPollingCount] = useState(0)
   const [retryKey, setRetryKey] = useState(0)
   const [heroVisible, setHeroVisible] = useState(false)
+  const [regenerating, setRegenerating] = useState(false)
 
   const handleRetry = () => {
     setLoading(true); setError(null); setPollingCount(0); setRetryKey(k => k + 1)
@@ -295,6 +296,27 @@ export default function CandidateScorecardPage({ params }: { params: { interview
     communication: assessment.communication_score ?? dr.communication_score,
     cultural_fit: assessment.cultural_fit_score ?? dr.cultural_fit_score,
     problem_solving: assessment.problem_solving_score ?? dr.problem_solving_score,
+  }
+
+  const allScoresNull = scores.technical == null && scores.behavioral == null &&
+    scores.communication == null && scores.cultural_fit == null && scores.problem_solving == null
+
+  const handleRegenerate = async () => {
+    setRegenerating(true)
+    try {
+      const token = localStorage.getItem('hireai_token') || localStorage.getItem('sb-access-token') || ''
+      const headers: Record<string, string> = {}
+      if (token) headers['Authorization'] = `Bearer ${token}`
+      await axios.post(`${getApiUrl()}/api/v1/assessments/${params.interviewId}/regenerate`, {}, { headers })
+      // Wait 15 seconds then re-fetch the assessment
+      setTimeout(() => {
+        setRegenerating(false)
+        handleRetry()
+      }, 15000)
+    } catch (err) {
+      console.error('Regeneration failed:', err)
+      setRegenerating(false)
+    }
   }
 
   // ── Tab guard state ──────────────────────────────────────────────────────────
@@ -460,6 +482,32 @@ export default function CandidateScorecardPage({ params }: { params: { interview
               description="Team & values alignment" delay={400} />
             <SkillBar label="Problem Solving" score={scores.problem_solving}
               description="Analytical thinking" delay={500} />
+
+            {/* Show regenerate button if all scores are null */}
+            {allScoresNull && (
+              <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-2xl">
+                <div className="flex items-center gap-3">
+                  <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-amber-800">No scores were generated</p>
+                    <p className="text-xs text-amber-600 mt-0.5">
+                      This may happen if the interview session had technical issues. You can try regenerating the assessment.
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleRegenerate}
+                    disabled={regenerating}
+                    className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-bold rounded-xl transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2 shrink-0"
+                  >
+                    {regenerating ? (
+                      <><Loader2 className="w-4 h-4 animate-spin" /> Regenerating...</>
+                    ) : (
+                      <><RefreshCw className="w-4 h-4" /> Regenerate</>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

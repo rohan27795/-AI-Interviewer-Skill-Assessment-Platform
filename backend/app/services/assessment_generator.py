@@ -41,23 +41,15 @@ DIMENSION_WEIGHTS: dict = {
 # ── Prompt template ───────────────────────────────────────────────────────────
 
 ASSESSMENT_PROMPT = """
-You are an expert talent assessment AI. Analyze the ACTUAL interview transcript below.
+You are an expert talent assessment AI. Analyze the interview transcript below and generate scores.
 
-CRITICAL RULES — VIOLATION OF THESE = INVALID ASSESSMENT:
-1. Only score dimensions supported by the transcript. If in doubt, use null.
-2. null means "not enough evidence to score" — use it freely and honestly.
-3. NEVER assign 50 as a default score. 50 is not a valid fallback. If you cannot score it, use null.
-4. Do NOT fabricate scores, strengths, or insights not directly evidenced in the transcript.
-5. If a round did NOT occur (no transcript turns for it), set its score to null.
-6. If total_turns < 6, the interview is too short. Set all skill scores to null and overall_score to null.
-7. The termination_reason tells you WHY the interview ended — factor it into all narrative fields.
-
-Minimum evidence required before scoring each dimension:
-- technical_score: must have at least 5 candidate turns in the technical round with substantive answers
-- behavioral_score: must have at least 3 candidate turns in the behavioral round
-- communication_score: must have at least 4 total candidate turns across any rounds
-- cultural_fit_score: must have evidence of values / team-fit discussion (intro or behavioral round)
-- problem_solving_score: requires technical round with problem-solving discussion
+SCORING RULES:
+1. If a round occurred (has transcript turns), you MUST provide a numeric score (0-100). Do NOT use null for rounds that occurred.
+2. Use null ONLY if a round literally did not happen (zero turns for that round in the transcript).
+3. Base scores on the actual quality of candidate responses. Short or vague answers = low scores (20-40), not null.
+4. "Bye", "Thank you", filler words, and partial sentences are normal in speech-to-text transcripts. Focus on the substantive content.
+5. Score each dimension honestly based on available evidence. Even brief evidence warrants a score.
+6. communication_score should ALWAYS have a value if the candidate spoke at all.
 
 Job Title: {job_title}
 Candidate Name: {candidate_name}
@@ -77,32 +69,32 @@ AI Shield / Proctoring Events:
 Raw Proctoring JSON:
 {proctoring_logs_json}
 
-Generate a JSON assessment with this EXACT schema. Use null for any dimension you cannot score from evidence:
+Generate a JSON assessment with this EXACT schema:
 {{
-  "overall_score": float (0-100) or null if insufficient data,
-  "technical_score": float (0-100) or null if technical round not conducted or insufficient evidence,
-  "behavioral_score": float (0-100) or null if behavioral round not conducted or insufficient evidence,
-  "communication_score": float (0-100) if enough speech occurred (4+ candidate turns), else null,
-  "cultural_fit_score": float (0-100) or null if behavioral/intro insufficient,
-  "problem_solving_score": float (0-100) or null if technical round not conducted or insufficient evidence,
+  "overall_score": float (0-100),
+  "technical_score": float (0-100) or null if technical round did not occur,
+  "behavioral_score": float (0-100) or null if behavioral round did not occur,
+  "communication_score": float (0-100) — always score this if candidate spoke,
+  "cultural_fit_score": float (0-100) or null if no intro/behavioral round,
+  "problem_solving_score": float (0-100) or null if no technical round,
 
   "completion_status": "completed" | "early_exit" | "tab_guard",
   "rounds_completed": list of round names that had content,
   "total_turns_assessed": integer,
 
   "verdict": "strong_hire" | "hire" | "no_hire" | "strong_no_hire",
-  "verdict_reasoning": "Evidence-only 2-3 sentences. Be direct about interview completeness. No flattery.",
+  "verdict_reasoning": "2-3 sentences with evidence from transcript.",
 
-  "key_strengths": ["Only list strengths with explicit transcript evidence. Empty list [] if insufficient."],
-  "areas_of_improvement": ["Concrete gaps observed. Note if assessment is incomplete due to short interview."],
+  "key_strengths": ["List strengths observed in the transcript"],
+  "areas_of_improvement": ["List areas where candidate could improve"],
 
-  "technical_highlights": ["Only if technical round occurred with enough evidence"],
-  "technical_concerns": ["Only if technical round occurred with enough evidence"],
-  "behavioral_highlights": ["Only if behavioral round occurred with enough evidence"],
+  "technical_highlights": ["Key technical points if technical round occurred"],
+  "technical_concerns": ["Technical gaps if technical round occurred"],
+  "behavioral_highlights": ["Key behavioral points if behavioral round occurred"],
 
   "expected_salary": integer (INR) or null,
   "negotiated_salary": integer (INR) or null,
-  "salary_notes": "string — note if salary round not reached",
+  "salary_notes": "string",
 
   "security_report": {{
     "shield_alert_timeline": ["Timestamped alert lines. Empty array if no issues."],
@@ -116,25 +108,25 @@ Generate a JSON assessment with this EXACT schema. Use null for any dimension yo
   "round_summaries": [
     {{
       "round": "intro|technical|behavioral|salary",
-      "score": float or null,
+      "score": float (0-100),
       "duration_estimate_mins": integer,
-      "key_takeaways": ["Only from actual transcript content"],
+      "key_takeaways": ["From actual transcript content"],
       "red_flags": ["list, empty if none"]
     }}
   ],
 
-  "hiring_recommendation": "1-2 honest paragraph for recruiter — be direct about interview completeness and data quality",
-  "suggested_onboarding_notes": "string or empty if insufficient data"
+  "hiring_recommendation": "1-2 paragraph recommendation for the recruiter",
+  "suggested_onboarding_notes": "string or empty"
 }}
 
-Scoring rules (STRICTLY ENFORCED):
-- Scores must reflect ONLY evidence from the provided transcript. No guessing.
-- DO NOT use 50 as a default. If uncertain, use null.
-- Tab guard termination → integrity_score <= 30, final_security_verdict = "major_violations", verdict = "no_hire" or "strong_no_hire".
-- Early exit with < 6 total turns → all skill scores = null, overall_score = null.
-- Short interviews (6-14 turns) → scores must be conservative (no score above 65 without clear evidence).
+Additional scoring guidance:
+- Tab guard termination: integrity_score <= 30, verdict = "no_hire" or "strong_no_hire".
+- Early exit with very few turns (< 6): use conservative scores (15-35 range) rather than null.
+- Short interviews (6-14 turns): scores should be conservative (cap at 65).
+- Ignore "Bye", "Bye-bye", "Thank you" as these are speech recognition artifacts.
 - Return ONLY valid JSON.
 """
+
 
 
 # ── Transcript analysis ───────────────────────────────────────────────────────
