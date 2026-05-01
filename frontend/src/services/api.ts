@@ -75,7 +75,7 @@ export const profilesApi = {
 export const jobsApi = {
   list: (params?: { status?: string; department?: string; search?: string }) => {
     const qs = new URLSearchParams(params as Record<string, string>).toString()
-    return request(`/api/v1/jobs${qs ? `?${qs}` : ''}`)
+    return request(`/api/v1/jobs/${qs ? `?${qs}` : ''}`)
   },
 
   get: (jobId: string) => request(`/api/v1/jobs/${jobId}`),
@@ -106,7 +106,7 @@ export const applicationsApi = {
 
   list: (params?: { jobId?: string; status?: string }) => {
     const qs = new URLSearchParams(params as Record<string, string>).toString()
-    return request(`/api/v1/applications${qs ? `?${qs}` : ''}`)
+    return request(`/api/v1/applications/${qs ? `?${qs}` : ''}`)
   },
 }
 
@@ -127,7 +127,7 @@ export const scheduleApi = {
 
 export const assessmentsApi = {
   get: (interviewId: string) => request(`/api/v1/assessments/${interviewId}`),
-  list: (jobId?: string) => request(`/api/v1/assessments${jobId ? `?job_id=${jobId}` : ''}`),
+  list: (jobId?: string) => request(`/api/v1/assessments/${jobId ? `?job_id=${jobId}` : ''}`),
 }
 
 // ─── Analytics ─────────────────────────────────────────────
