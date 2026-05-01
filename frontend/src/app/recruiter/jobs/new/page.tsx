@@ -57,7 +57,8 @@ export default function NewJobPage() {
           title: form.title,
           department: form.department,
           job_type: form.job_type,
-          location: form.location
+          location: form.location,
+          user_input: form.description
         }),
       })
 

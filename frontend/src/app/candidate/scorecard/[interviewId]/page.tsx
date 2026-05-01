@@ -60,7 +60,7 @@ function SkillBar({ label, score, description, delay = 0 }: {
         <div className="text-xs text-surface-400">{description}</div>
       </div>
       <div className="flex-1 h-2.5 bg-surface-100 rounded-full">
-        <div className="h-full w-full bg-surface-200 rounded-full animate-pulse" />
+        <div className="h-full w-0 bg-surface-200 rounded-full" />
       </div>
       <span className="text-xs font-bold text-surface-400 italic shrink-0 w-24 text-right">Not Assessed</span>
     </div>
@@ -87,44 +87,54 @@ function SkillBar({ label, score, description, delay = 0 }: {
 
 // ── Round Journey Timeline ────────────────────────────────────────────────────
 function RoundTimeline({ roundsDone, roundSummaries }: { roundsDone: string[]; roundSummaries: any[] }) {
+  // intro is NOT included in the weighted overall score — it's just an icebreaker
   const allRounds = [
-    { id: 'intro', label: 'Introduction', icon: '👋', color: '#6366f1' },
-    { id: 'technical', label: 'Technical', icon: '💻', color: '#a855f7' },
-    { id: 'behavioral', label: 'Behavioural', icon: '🧠', color: '#f59e0b' },
-    { id: 'salary', label: 'Discussion', icon: '💰', color: '#22c55e' },
+    { id: 'intro',      label: 'Introduction', icon: '👋', color: '#6366f1', weighted: false },
+    { id: 'technical',  label: 'Technical',    icon: '💻', color: '#a855f7', weighted: true  },
+    { id: 'behavioral', label: 'Behavioural',  icon: '🧠', color: '#f59e0b', weighted: true  },
+    { id: 'salary',     label: 'Discussion',   icon: '💰', color: '#22c55e', weighted: true  },
   ]
 
   return (
-    <div className="relative">
-      {/* Connecting line */}
-      <div className="absolute top-6 left-6 right-6 h-0.5 bg-surface-200 z-0" />
-      <div className="relative z-10 flex items-start justify-between">
-        {allRounds.map((round, i) => {
-          const done = roundsDone.includes(round.id)
-          const summary = roundSummaries?.find((r: any) => r.round === round.id)
-          const score = summary?.score
-          return (
-            <div key={round.id} className="flex flex-col items-center gap-2 flex-1 first:items-start last:items-end">
-              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-lg font-bold shadow-sm transition-all
-                ${done ? 'shadow-lg scale-110' : 'opacity-30 grayscale'}`}
-                style={done ? { background: `${round.color}20`, border: `2px solid ${round.color}`, boxShadow: `0 0 12px ${round.color}30` } : { background: '#f1f5f9', border: '2px solid #e2e8f0' }}>
-                {round.icon}
-              </div>
-              <div className="text-center">
-                <div className={`text-xs font-bold capitalize ${done ? 'text-surface-800' : 'text-surface-400'}`}>
-                  {round.label}
+    <div>
+      <div className="relative">
+        {/* Connecting line */}
+        <div className="absolute top-6 left-6 right-6 h-0.5 bg-surface-200 z-0" />
+        <div className="relative z-10 flex items-start justify-between">
+          {allRounds.map((round) => {
+            const done = roundsDone.includes(round.id)
+            const summary = roundSummaries?.find((r: any) => r.round === round.id)
+            const score = summary?.score
+            return (
+              <div key={round.id} className="flex flex-col items-center gap-2 flex-1 first:items-start last:items-end">
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-lg font-bold shadow-sm transition-all
+                  ${done ? 'shadow-lg scale-110' : 'opacity-30 grayscale'}`}
+                  style={done ? { background: `${round.color}20`, border: `2px solid ${round.color}`, boxShadow: `0 0 12px ${round.color}30` } : { background: '#f1f5f9', border: '2px solid #e2e8f0' }}>
+                  {round.icon}
                 </div>
-                {done && score != null && (
-                  <div className="text-[10px] font-black mt-0.5" style={{ color: round.color }}>
-                    {Math.round(score)}/100
+                <div className="text-center">
+                  <div className={`text-xs font-bold capitalize ${done ? 'text-surface-800' : 'text-surface-400'}`}>
+                    {round.label}
                   </div>
-                )}
-                {!done && <div className="text-[10px] text-surface-300 mt-0.5">Not reached</div>}
+                  {done && score != null && (
+                    <div className="text-[10px] font-black mt-0.5" style={{ color: round.color }}>
+                      {Math.round(score)}/100
+                    </div>
+                  )}
+                  {done && !round.weighted && (
+                    <div className="text-[10px] text-surface-400 mt-0.5 italic">icebreaker</div>
+                  )}
+                  {!done && <div className="text-[10px] text-surface-300 mt-0.5">Not reached</div>}
+                </div>
               </div>
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
       </div>
+      <p className="text-[10px] text-surface-400 mt-4 text-center">
+        ★ The Introduction round is an icebreaker and is <strong>not included</strong> in your overall score.
+        Your overall score is calculated by averaging your core performance skills above (excluding any that were not assessed).
+      </p>
     </div>
   )
 }
@@ -146,11 +156,37 @@ function StatPill({ icon: Icon, label, value, color }: { icon: any; label: strin
 
 // ── Score label for candidate (no hire/no-hire language) ─────────────────────
 function getCandidateScoreLabel(score: number): { label: string; sublabel: string; color: string } {
+  if (score <= 0)  return { label: 'Pending Review', sublabel: 'Your interview is being reviewed by our team', color: '#94a3b8' }
   if (score >= 85) return { label: 'Outstanding', sublabel: 'Top-tier performance across all areas', color: '#22c55e' }
   if (score >= 75) return { label: 'Strong', sublabel: 'Solid performance with clear strengths', color: '#3b82f6' }
-  if (score >= 60) return { label: 'Good', sublabel: 'Demonstrated potential with room to grow', color: '#a855f7' }
-  if (score >= 45) return { label: 'Developing', sublabel: 'Good start — keep building your skills', color: '#f59e0b' }
-  return { label: 'Emerging', sublabel: 'Early stage — great learning experience', color: '#f97316' }
+  if (score >= 60) return { label: 'Promising', sublabel: 'Demonstrated good potential with clear strengths', color: '#a855f7' }
+  if (score >= 45) return { label: 'Developing', sublabel: 'Good start — keep building on your experience', color: '#f59e0b' }
+  return { label: 'Early Stage', sublabel: 'Great learning experience — keep practising!', color: '#f97316' }
+}
+
+// ── Sanitise AI feedback for candidates (remove recruiter-internal verdicts) ──
+// Strategy: replace whole sentences that contain verdict language with a neutral
+// rewrite rather than stripping individual words, which can leave fragments.
+function sanitiseFeedback(raw: string): string {
+  if (!raw) return ''
+
+  // Step 1: Sentence-level replacement — catch sentences that contain internal
+  // verdict phrases and replace the whole sentence with nothing (removed cleanly).
+  const verdictSentencePattern =
+    /[^.!?]*\b(strong[- ]hire|strong[- ]no[- ]hire|no[- ]hire|\bhire\b|do not (move forward|proceed)|not (moving forward|proceeding)|recommend against|reject(ed|ion)?)\b[^.!?]*[.!?]?/gi
+
+  let cleaned = raw.replace(verdictSentencePattern, '').trim()
+
+  // Step 2: If nothing was left after removal, return a neutral fallback
+  if (!cleaned || cleaned.length < 20) {
+    return 'Based on the interview, there are areas for improvement before the next stage.'
+  }
+
+  // Step 3: Clean up double spaces and leading/trailing punctuation
+  return cleaned
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^[,;.\s]+|[,;.\s]+$/g, '')
+    .trim()
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
@@ -468,7 +504,7 @@ export default function CandidateScorecardPage({ params }: { params: { interview
               <h2 className="text-base font-black text-surface-900">Your Performance</h2>
             </div>
             <p className="text-xs text-surface-400 font-medium ml-11">
-              Scores are based on the rounds you actually participated in
+              Only the rounds you completed are counted in your overall score. Rounds that did not occur are excluded.
             </p>
           </div>
           <div className="px-6 pb-6 pt-2">
@@ -512,21 +548,24 @@ export default function CandidateScorecardPage({ params }: { params: { interview
         </div>
 
         {/* AI Feedback */}
-        {dr.hiring_recommendation && (
-          <div className="bg-white rounded-3xl border border-surface-100 shadow-xl p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-8 h-8 rounded-xl bg-purple-50 flex items-center justify-center">
-                <Sparkles className="w-4 h-4 text-purple-500" />
+        {(dr.hiring_recommendation || dr.verdict_reasoning) && (() => {
+          const rawText = dr.hiring_recommendation || dr.verdict_reasoning || ''
+          const cleaned = sanitiseFeedback(rawText)
+          if (!cleaned) return null
+          return (
+            <div className="bg-white rounded-3xl border border-surface-100 shadow-xl p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-8 h-8 rounded-xl bg-purple-50 flex items-center justify-center">
+                  <Sparkles className="w-4 h-4 text-purple-500" />
+                </div>
+                <h2 className="text-base font-black text-surface-900">Interviewer Feedback</h2>
               </div>
-              <h2 className="text-base font-black text-surface-900">Interviewer Feedback</h2>
+              <blockquote className="border-l-4 border-brand-400 pl-5 py-2 text-sm text-surface-700 italic leading-relaxed bg-surface-50 rounded-r-2xl">
+                {cleaned}
+              </blockquote>
             </div>
-            <blockquote className="border-l-4 border-brand-400 pl-5 py-2 text-sm text-surface-700 italic leading-relaxed bg-surface-50 rounded-r-2xl">
-              {/* Show hiring_recommendation but strip HR-internal verdict language */}
-              {dr.hiring_recommendation.replace(/\b(strong hire|hire|no hire|strong no hire)\b/gi, '').trim() ||
-                dr.verdict_reasoning || 'Your interview performance has been recorded and reviewed.'}
-            </blockquote>
-          </div>
-        )}
+          )
+        })()}
 
         {/* Strengths & Growth Grid */}
         {(dr.key_strengths?.length > 0 || dr.areas_of_improvement?.length > 0) && (

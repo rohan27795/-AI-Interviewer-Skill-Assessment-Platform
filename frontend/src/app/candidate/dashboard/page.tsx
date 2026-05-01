@@ -300,9 +300,14 @@ function CandidateDashboardInner() {
                    <CheckCircle className="w-5 h-5 text-green-500" />
                 </div>
               ) : (
-                <div className="mb-4 p-4 rounded-xl bg-orange-50 border border-orange-100 flex items-start gap-3">
-                   <AlertCircle className="w-5 h-5 text-orange-500 shrink-0 mt-0.5" />
-                   <p className="text-xs text-orange-700 font-medium">You haven't uploaded a global resume yet. Upload one to unlock AI matching!</p>
+                <div className="mb-4 p-5 rounded-2xl bg-gradient-to-r from-brand-50 to-purple-50 border border-brand-100 flex items-start gap-4">
+                   <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center shrink-0 shadow-sm border border-brand-100">
+                     <Sparkles className="w-4 h-4 text-brand-500" />
+                   </div>
+                   <div>
+                     <p className="text-sm text-surface-900 font-bold mb-0.5">Let's find your perfect match</p>
+                     <p className="text-xs text-surface-600 font-medium leading-relaxed">Upload a global resume below to unlock personalized AI matching and instant insights.</p>
+                   </div>
                 </div>
               )}
 
@@ -367,9 +372,12 @@ function CandidateDashboardInner() {
                   {profile.parsed_data?.summary && (
                      <div>
                        <h4 className="text-xs font-black uppercase tracking-widest text-surface-400 mb-2">AI Summary</h4>
-                       <p className="text-sm text-surface-700 leading-relaxed bg-surface-50 p-4 rounded-2xl border border-surface-100 italic">
-                         "{profile.parsed_data.summary}"
-                       </p>
+                       <div className="relative">
+                         <div className="absolute -inset-0.5 bg-gradient-to-r from-brand-400 to-purple-400 rounded-2xl blur opacity-20"></div>
+                         <p className="relative text-sm text-surface-700 leading-relaxed bg-white/80 backdrop-blur-sm p-4 rounded-2xl border border-brand-100/50 italic shadow-sm">
+                           "{profile.parsed_data.summary}"
+                         </p>
+                       </div>
                      </div>
                   )}
                 </div>
@@ -395,9 +403,9 @@ function CandidateDashboardInner() {
               ) : (
                 <div className="grid sm:grid-cols-2 gap-4">
                   {recommendedJobs.slice(0, 4).map((job: any) => (
-                    <div key={job.id} className="bg-white rounded-3xl border border-surface-100 shadow-sm hover:shadow-card-hover transition-all p-5 group flex flex-col">
+                    <div key={job.id} className="bg-white rounded-3xl border border-surface-100 hover:border-brand-200 shadow-sm hover:shadow-card-hover hover:shadow-brand-500/5 transition-all duration-300 p-5 group flex flex-col">
                       <div className="flex justify-between items-start mb-3">
-                        <div className="w-10 h-10 bg-brand-50 border border-brand-100 rounded-xl flex items-center justify-center">
+                        <div className="w-10 h-10 bg-brand-50 border border-brand-100 rounded-xl flex items-center justify-center group-hover:scale-105 transition-transform">
                            <Briefcase className="w-5 h-5 text-brand-600" />
                         </div>
                         {/* Match Indicator Removed */}
@@ -405,8 +413,8 @@ function CandidateDashboardInner() {
                       <h4 className="font-bold text-surface-900 mb-1 group-hover:text-brand-600 transition-colors">{job.title}</h4>
                       <p className="text-xs text-surface-500 font-medium mb-4 flex items-center gap-1.5"><MapPin className="w-3 h-3" /> {job.location || 'Remote'}</p>
                       
-                      <Link href={`/candidate/apply?job_id=${job.id}`} className="mt-auto w-full py-2.5 bg-surface-50 hover:bg-brand-50 text-surface-900 hover:text-brand-700 text-xs font-black uppercase tracking-widest rounded-xl text-center transition-colors border border-surface-200 hover:border-brand-200">
-                        Fast Apply
+                      <Link href={`/candidate/apply?job_id=${job.id}`} className="mt-auto w-full py-2.5 bg-surface-50 group-hover:bg-brand-600 text-surface-900 group-hover:text-white text-xs font-black uppercase tracking-widest rounded-xl text-center transition-all duration-300 shadow-sm group-hover:shadow-brand-500/20">
+                        Apply
                       </Link>
                     </div>
                   ))}

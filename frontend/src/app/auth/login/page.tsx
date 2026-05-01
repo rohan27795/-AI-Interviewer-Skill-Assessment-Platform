@@ -22,13 +22,25 @@ function LoginContent() {
     setLoading(true)
     setLoadingMsg('Signing in...')
     const msgTimer = setTimeout(() => setLoadingMsg('Almost there...'), 3000)
+    
+    // Add a timeout to the fetch request
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 15000) // 15 second timeout
+
     try {
       const API_URL = getApiUrl()
+      console.log(`[Login] Attempting login to: ${API_URL}/api/v1/auth/login`)
+      
       const response = await fetch(`${API_URL}/api/v1/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: form.email, password: form.password }),
+        signal: controller.signal,
       })
+      
+      clearTimeout(timeoutId)
+      console.log(`[Login] Response received: ${response.status} ${response.statusText}`)
+
       if (!response.ok) {
         const err = await response.json()
         throw new Error(err.detail || 'Login failed')
@@ -42,9 +54,15 @@ function LoginContent() {
       const dbRole = data.user?.role || 'candidate'
       router.push(dbRole === 'recruiter' || dbRole === 'admin' ? '/recruiter/jobs' : '/candidate/dashboard')
     } catch (err: any) {
-      toast.error(err.message || 'Invalid credentials. Please try again.')
+      if (err.name === 'AbortError') {
+        toast.error('Login request timed out. Please check if the backend is running.')
+      } else {
+        toast.error(err.message || 'Invalid credentials. Please try again.')
+      }
+      console.error('[Login] Error:', err)
     } finally {
       clearTimeout(msgTimer)
+      clearTimeout(timeoutId)
       setLoading(false)
     }
   }

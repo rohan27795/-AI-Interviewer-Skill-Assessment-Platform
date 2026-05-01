@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: List[str] = [
         "http://localhost:3000",
         "http://localhost:3002",
+        "http://127.0.0.1:3002",
         "https://hireai.vercel.app",
         "https://hiring.ashishai.in",
         "https://ashishai.in",

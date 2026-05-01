@@ -40,6 +40,7 @@ export interface UseAuthReturn {
   isLoading: boolean
   logout: () => void
   getInitials: () => string
+  updateUser: (newData: Partial<AuthUser>) => void
 }
 
 export function useAuth(): UseAuthReturn {
@@ -48,8 +49,7 @@ export function useAuth(): UseAuthReturn {
   const [token, setToken] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
-  useEffect(() => {
-    // Runs only on client — localStorage is not available during SSR
+  const loadUser = useCallback(() => {
     const storedToken = localStorage.getItem('hireai_token')
     const storedUser = localStorage.getItem('hireai_user')
 
@@ -59,13 +59,18 @@ export function useAuth(): UseAuthReturn {
         setToken(storedToken)
         setUser(parsedUser)
       } catch {
-        // Corrupted storage — clear it
         localStorage.removeItem('hireai_token')
         localStorage.removeItem('hireai_user')
       }
     }
     setIsLoading(false)
   }, [])
+
+  useEffect(() => {
+    loadUser()
+    window.addEventListener('hireai_user_updated', loadUser)
+    return () => window.removeEventListener('hireai_user_updated', loadUser)
+  }, [loadUser])
 
   const logout = useCallback(() => {
     localStorage.removeItem('hireai_token')
@@ -82,6 +87,20 @@ export function useAuth(): UseAuthReturn {
     return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase()
   }, [user])
 
+  const updateUser = useCallback((newData: Partial<AuthUser>) => {
+    const storedUser = localStorage.getItem('hireai_user')
+    if (storedUser) {
+      const parsedUser = JSON.parse(storedUser)
+      const updatedUser = { ...parsedUser, ...newData }
+      if (newData.profile) {
+        updatedUser.profile = { ...parsedUser.profile, ...newData.profile }
+      }
+      localStorage.setItem('hireai_user', JSON.stringify(updatedUser))
+      window.dispatchEvent(new Event('hireai_user_updated'))
+      setUser(updatedUser)
+    }
+  }, [])
+
   return {
     user,
     token,
@@ -90,5 +109,6 @@ export function useAuth(): UseAuthReturn {
     isLoading,
     logout,
     getInitials,
+    updateUser,
   }
 }

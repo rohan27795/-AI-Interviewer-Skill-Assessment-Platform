@@ -10,14 +10,14 @@ import { applicationsApi, analyticsApi } from '@/services/api'
 import { Suspense } from 'react'
 
 const statusConfig: Record<string, { label: string; dot: string; bg: string; text: string }> = {
-  shortlisted:  { label: 'Shortlisted',  dot: 'bg-blue-400',   bg: 'bg-blue-50',   text: 'text-blue-700'   },
-  interviewed:  { label: 'Interviewed',  dot: 'bg-purple-400', bg: 'bg-purple-50', text: 'text-purple-700' },
-  'in-review':  { label: 'In Review',    dot: 'bg-amber-400',  bg: 'bg-amber-50',  text: 'text-amber-700'  },
-  offer:        { label: 'Offer Sent',   dot: 'bg-green-400',  bg: 'bg-green-50',  text: 'text-green-700'  },
-  rejected:     { label: 'Rejected',     dot: 'bg-red-400',    bg: 'bg-red-50',    text: 'text-red-700'    },
-  scheduled:    { label: 'Scheduled',    dot: 'bg-indigo-400', bg: 'bg-indigo-50', text: 'text-indigo-700' },
-  invited:      { label: 'Invited',      dot: 'bg-sky-400',    bg: 'bg-sky-50',    text: 'text-sky-700'    },
   applied:      { label: 'Applied',      dot: 'bg-slate-400',  bg: 'bg-slate-50',  text: 'text-slate-700'  },
+  screening:    { label: 'Screening',    dot: 'bg-amber-400',  bg: 'bg-amber-50',  text: 'text-amber-700'  },
+  invited:      { label: 'Invited',      dot: 'bg-sky-400',    bg: 'bg-sky-50',    text: 'text-sky-700'    },
+  scheduled:    { label: 'Scheduled',    dot: 'bg-indigo-400', bg: 'bg-indigo-50', text: 'text-indigo-700' },
+  interviewing: { label: 'Interviewing', dot: 'bg-purple-400', bg: 'bg-purple-50', text: 'text-purple-700' },
+  interviewed:  { label: 'Interviewed',  dot: 'bg-fuchsia-400',bg: 'bg-fuchsia-50',text: 'text-fuchsia-700'},
+  offered:      { label: 'Offered',      dot: 'bg-green-400',  bg: 'bg-green-50',  text: 'text-green-700'  },
+  rejected:     { label: 'Rejected',     dot: 'bg-red-400',    bg: 'bg-red-50',    text: 'text-red-700'    },
 }
 
 const scoreColor = (s: number) => s >= 85 ? 'text-green-600' : s >= 70 ? 'text-amber-600' : s > 0 ? 'text-red-500' : 'text-surface-300'
@@ -31,8 +31,7 @@ function CandidatesContent() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [sortBy, setSortBy] = useState('score')
   
-  const [activeTab, setActiveTab] = useState<'applications' | 'pool'>('applications')
-  const [talentPool, setTalentPool] = useState<any[]>([])
+
   const [candidates, setCandidates] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -58,7 +57,8 @@ function CandidatesContent() {
              avatar: avatar,
              location: d.jobs?.location || 'Remote',
              exp: d.parsed_data?.total_years_experience ? `${d.parsed_data.total_years_experience} yrs` : '0 yrs',
-             appliedAt: d.created_at ? new Date(d.created_at).toLocaleDateString() : 'Just now'
+             appliedAt: d.created_at ? new Date(d.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Just now',
+             scheduledAt: d.interviews?.scheduled_at ? new Date(d.interviews.scheduled_at) : null
            }
         })
         setCandidates(mapped)
@@ -70,26 +70,17 @@ function CandidatesContent() {
     }
     fetchCandidates()
 
-    // Fetch talent pool separately
-    const fetchTalentPool = async () => {
-      try {
-        const pool: any = await analyticsApi.getTalentPool()
-        setTalentPool(pool || [])
-      } catch (err) {
-        console.error('Failed to fetch talent pool', err)
-      }
-    }
-    fetchTalentPool()
+
   }, [])
 
-  const filtered = candidates
-    .filter(c => {
-      const matchSearch = c.name.toLowerCase().includes(search.toLowerCase()) ||
-        c.role.toLowerCase().includes(search.toLowerCase()) ||
-        c.email.toLowerCase().includes(search.toLowerCase())
-      const matchStatus = statusFilter === 'all' || c.status === statusFilter
-      return matchSearch && matchStatus
-    })
+  const searchFiltered = candidates.filter(c => 
+    c.name.toLowerCase().includes(search.toLowerCase()) ||
+    c.role.toLowerCase().includes(search.toLowerCase()) ||
+    c.email.toLowerCase().includes(search.toLowerCase())
+  )
+
+  const filtered = searchFiltered
+    .filter(c => statusFilter === 'all' || c.status === statusFilter)
     .sort((a, b) => sortBy === 'score' ? b.score - a.score : sortBy === 'match' ? b.matchScore - a.matchScore : 0)
 
   const statuses = ['all', ...Object.keys(statusConfig)]
@@ -136,7 +127,12 @@ function CandidatesContent() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
         <div>
           <h1 className="text-2xl font-bold font-display text-surface-900">All Candidates</h1>
-          <p className="text-surface-700 font-medium mt-1">{filtered.length} candidates across all positions</p>
+          <p className="text-surface-700 font-medium mt-1">
+            {statusFilter === 'all'
+              ? `${searchFiltered.length} candidates across all positions`
+              : `Showing ${filtered.length} of ${searchFiltered.length} candidates · ${statusConfig[statusFilter]?.label || statusFilter}`
+            }
+          </p>
         </div>
         <div className="flex gap-2">
           <button 
@@ -150,10 +146,10 @@ function CandidatesContent() {
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
         {[
-          { label: 'Total Applied', value: candidates.length, color: 'bg-surface-100 text-surface-700' },
-          { label: 'Interviewed', value: candidates.filter(c => ['interviewing', 'interviewed', 'offered', 'hired'].includes(c.status)).length, color: 'bg-purple-100 text-purple-700' },
-          { label: 'Shortlisted', value: candidates.filter(c => ['invited', 'scheduled', 'interviewing', 'interviewed', 'offered', 'hired'].includes(c.status)).length, color: 'bg-blue-100 text-blue-700' },
-          { label: 'Offers Sent', value: candidates.filter(c => ['offered', 'hired'].includes(c.status)).length, color: 'bg-green-100 text-green-700' },
+          { label: 'Total Applied', value: searchFiltered.length, color: 'bg-surface-100 text-surface-700' },
+          { label: 'Interviewed', value: searchFiltered.filter(c => ['interviewing', 'interviewed', 'offered', 'hired'].includes(c.status)).length, color: 'bg-purple-100 text-purple-700' },
+          { label: 'Shortlisted', value: searchFiltered.filter(c => ['invited', 'scheduled', 'interviewing', 'interviewed', 'offered', 'hired'].includes(c.status)).length, color: 'bg-blue-100 text-blue-700' },
+          { label: 'Offers Sent', value: searchFiltered.filter(c => ['offered', 'hired'].includes(c.status)).length, color: 'bg-green-100 text-green-700' },
         ].map(s => (
           <div key={s.label} className={`rounded-2xl p-4 ${s.color} text-center`}>
             <div className="text-2xl font-bold font-display">{s.value}</div>
@@ -162,18 +158,7 @@ function CandidatesContent() {
         ))}
       </div>
 
-      {/* Tabs */}
-      <div className="flex bg-surface-100 rounded-2xl p-1 mb-6 max-w-sm">
-        <button onClick={() => setActiveTab('applications')} className={`flex-1 py-2.5 text-sm font-bold rounded-xl transition-all ${activeTab === 'applications' ? 'bg-white text-surface-900 shadow-sm' : 'text-surface-500 hover:text-surface-700'}`}>
-          Active Applications
-        </button>
-        <button onClick={() => setActiveTab('pool')} className={`flex-1 py-2.5 text-sm font-bold rounded-xl transition-all ${activeTab === 'pool' ? 'bg-white text-brand-700 shadow-sm' : 'text-surface-500 hover:text-surface-700'} flex items-center justify-center gap-1.5`}>
-          <Brain className="w-4 h-4" /> Active Talent Pool ({talentPool.length})
-        </button>
-      </div>
 
-      {activeTab === 'applications' ? (
-        <>
           {/* Filters */}
       <div className="glass-card mb-6 p-1">
         <div className="flex flex-col sm:flex-row gap-3 p-4">
@@ -201,7 +186,7 @@ function CandidatesContent() {
 
         {/* Status Filter Pills */}
         <div className="px-4 pb-4 flex flex-wrap gap-2">
-          {statuses.slice(0, 7).map(s => (
+          {statuses.map(s => (
             <button key={s}
               onClick={() => setStatusFilter(s)}
               className={`text-xs font-semibold px-3 py-1.5 rounded-full capitalize transition-colors ${
@@ -210,7 +195,7 @@ function CandidatesContent() {
                   : 'bg-surface-100 text-surface-600 hover:bg-surface-200'
               }`}>
               {s === 'all' ? 'All Statuses' : statusConfig[s]?.label || s}
-              {s === 'all' ? ` (${candidates.length})` : ` (${candidates.filter(c => c.status === s).length})`}
+              {s === 'all' ? ` (${searchFiltered.length})` : ` (${searchFiltered.filter(c => c.status === s).length})`}
             </button>
           ))}
         </div>
@@ -274,12 +259,21 @@ function CandidatesContent() {
                           <Eye className="w-3.5 h-3.5" /> Report
                         </Link>
                       )}
-                      {!c.interviewed && c.status === 'scheduled' && (
-                        <Link href={`/candidate/room/${c.id}`}
-                          className="flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-50 hover:bg-green-100 px-2.5 py-1.5 rounded-lg transition-colors">
-                          <Video className="w-3.5 h-3.5" /> Join
-                        </Link>
-                      )}
+                      {!c.interviewed && c.status === 'scheduled' && (() => {
+                        const today = new Date()
+                        today.setHours(0, 0, 0, 0)
+                        const isUpcoming = !c.scheduledAt || c.scheduledAt >= today
+                        return isUpcoming ? (
+                          <Link href={`/candidate/room/${c.id}`}
+                            className="flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-50 hover:bg-green-100 px-2.5 py-1.5 rounded-lg transition-colors">
+                            <Video className="w-3.5 h-3.5" /> Join
+                          </Link>
+                        ) : (
+                          <span className="flex items-center gap-1 text-xs font-semibold text-surface-400 bg-surface-50 px-2.5 py-1.5 rounded-lg">
+                            <Video className="w-3.5 h-3.5" /> Expired
+                          </span>
+                        )
+                      })()}
                     </div>
                   </td>
                 </tr>
@@ -296,87 +290,7 @@ function CandidatesContent() {
           </div>
         )}
       </div>
-      </>
-      ) : (
-        <div className="glass-card p-6">
-          <div className="mb-6 flex items-center gap-3 bg-brand-50/50 backdrop-blur-md border border-brand-100/50 p-4 rounded-xl">
-            <Brain className="w-8 h-8 text-brand-600" />
-            <div>
-              <h3 className="font-bold text-brand-900 text-sm">Passive Talent Pool</h3>
-              <p className="text-xs text-brand-700">Candidates with active profiles who haven't applied to your jobs yet — ready to be proactively sourced.</p>
-            </div>
-          </div>
-          
-          {talentPool.length === 0 ? (
-            <div className="text-center py-16 text-surface-500">
-              <Users className="w-10 h-10 mx-auto mb-3 opacity-40" />
-              <p className="font-medium">No passive candidates found</p>
-              <p className="text-sm mt-1 text-surface-400">Candidates who create profiles but haven't applied will appear here</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {talentPool.map((p: any) => (
-                <div key={p.id}
-                  className="glass-card p-4 flex flex-col gap-3 hover:scale-[1.01] transition-transform"
-                  style={{ border: '1px solid rgba(99,102,241,0.15)' }}
-                >
-                  {/* Header */}
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
-                      style={{ background: 'linear-gradient(135deg, #6366f1 0%, #d946ef 100%)' }}>
-                      {p.initials}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-surface-900 text-sm truncate">{p.name}</div>
-                      <div className="text-xs text-surface-500 font-medium">{p.experience_years} yrs exp</div>
-                    </div>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                      p.match_indicator === 'high' ? 'bg-green-100 text-green-700' :
-                      p.match_indicator === 'medium' ? 'bg-amber-100 text-amber-700' :
-                      'bg-slate-100 text-slate-600'
-                    }`}>
-                      {p.match_indicator === 'high' ? 'Senior' : p.match_indicator === 'medium' ? 'Mid' : 'Entry'}
-                    </span>
-                  </div>
 
-                  {/* Headline */}
-                  {p.headline && (
-                    <p className="text-xs text-surface-600 line-clamp-2 leading-relaxed">{p.headline}</p>
-                  )}
-
-                  {/* Skills */}
-                  {p.skills?.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
-                      {p.skills.slice(0, 5).map((s: string) => (
-                        <span key={s} className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
-                          {s}
-                        </span>
-                      ))}
-                      {p.skills.length > 5 && (
-                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-surface-100 text-surface-500">+{p.skills.length - 5}</span>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Actions */}
-                  <div className="flex gap-2 mt-auto pt-1">
-                    {p.resume_url && (
-                      <a href={p.resume_url} target="_blank" rel="noopener noreferrer"
-                        className="flex-1 flex items-center justify-center gap-1 text-xs font-semibold text-surface-700 bg-surface-100 hover:bg-surface-200 px-3 py-2 rounded-lg transition-colors">
-                        <FileText className="w-3.5 h-3.5" /> Resume
-                      </a>
-                    )}
-                    <button
-                      className="flex-1 flex items-center justify-center gap-1 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-3 py-2 rounded-lg transition-colors">
-                      <Star className="w-3.5 h-3.5" /> Invite
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   )
 }

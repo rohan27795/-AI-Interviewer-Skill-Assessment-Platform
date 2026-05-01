@@ -311,9 +311,13 @@ function ApplyContent() {
                 </div>
               </div>
               <h2 className="text-2xl font-bold text-surface-900 mb-3">AI is Reviewing Your Resume</h2>
-              <p className="text-surface-500 max-w-sm mx-auto text-sm leading-relaxed">
+              <p className="text-surface-500 max-w-sm mx-auto text-sm leading-relaxed mb-4">
                 Our AI matching engine is comparing your experience, skills, and qualifications against the job requirements...
               </p>
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-brand-50 text-brand-700 rounded-full text-xs font-bold">
+                <Clock className="w-3.5 h-3.5" />
+                This usually takes 30-60 seconds. Please don't close this window.
+              </div>
             </div>
           )}
 

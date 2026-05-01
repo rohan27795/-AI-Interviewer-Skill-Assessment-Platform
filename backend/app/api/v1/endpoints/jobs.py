@@ -114,6 +114,14 @@ async def generate_job_description(
     if current_user["role"] not in ("recruiter", "admin"):
         raise HTTPException(status_code=403, detail="Recruiter access required.")
 
+    user_instructions = ""
+    if data.user_input and data.user_input.strip():
+        user_instructions = f"""
+    The user has requested the following specific lines and keywords to be included:
+    "{data.user_input}"
+    Seamlessly incorporate these requirements and keywords into the final output so it looks natural and professional.
+    """
+
     prompt = f"""
     You are an expert HR and technical recruiter. Generate a professional and compelling job description based on the following details:
     
@@ -121,6 +129,7 @@ async def generate_job_description(
     Department: {data.department}
     Job Type: {data.job_type.replace('_', ' ').capitalize()}
     Location: {data.location}
+    {user_instructions}
     
     The job description should be structured exactly as follows:
     1. An introductory paragraph starting with "We are looking for an experienced [Title]..." explaining the core responsibility.

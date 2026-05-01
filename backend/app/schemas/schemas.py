@@ -147,7 +147,12 @@ class JobCreate(JobBase):
 class JobResponse(JobBase):
     id: str
     recruiter_id: str
+    status: Optional[str] = "active"
     created_at: datetime
+    
+    applications_count: Optional[int] = 0
+    shortlisted_count: Optional[int] = 0
+    interviewed_count: Optional[int] = 0
 
     class Config:
         from_attributes = True
@@ -158,6 +163,7 @@ class JDGenerationRequest(BaseModel):
     department: Optional[str] = Field("Engineering", description="Department name")
     job_type: Optional[str] = Field("full_time", description="full_time, part_time, etc.")
     location: Optional[str] = Field("Remote", description="Location of the job")
+    user_input: Optional[str] = Field(None, description="Optional keywords or specific lines to include in JD")
 
 
 class JDGenerationResponse(BaseModel):

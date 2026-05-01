@@ -113,7 +113,8 @@ export default function JobsPage() {
     } else if (platform === 'email') {
       const subject = `We're Hiring: ${job.title} — HireAI`
       const body = `${text}\n\nApply here: ${jobUrl}`
-      url = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+      // Open Gmail directly in a new browser tab with pre-filled fields
+      url = `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
     } else if (platform === 'naukri' as any) {
       url = `https://www.naukri.com/recruit/login`
       toast.success('Copied JD to clipboard for Naukri!')
@@ -124,7 +125,13 @@ export default function JobsPage() {
       navigator.clipboard.writeText(text + '\n\nApply: ' + jobUrl)
     }
 
-    if (url) window.open(url, '_blank', 'noopener,noreferrer')
+    if (url) {
+      if (url.startsWith('mailto:')) {
+        window.location.href = url
+      } else {
+        window.open(url, '_blank', 'noopener,noreferrer')
+      }
+    }
     setOpenDropdownId(null)
   }
 
@@ -303,7 +310,7 @@ export default function JobsPage() {
                 </div>
                 <div className="h-2 bg-surface-100 rounded-full overflow-hidden">
                   <div className="h-full bg-gradient-to-r from-brand-500 to-brand-400 rounded-full transition-all duration-700"
-                       style={{ width: `${job.applications > 0 ? (job.shortlisted / job.applications) * 100 : 0}%` }} />
+                       style={{ width: `${job.applications > 0 ? (job.interviewed / job.applications) * 100 : 0}%` }} />
                 </div>
               </div>
 

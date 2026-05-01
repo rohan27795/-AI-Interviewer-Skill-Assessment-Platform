@@ -9,6 +9,7 @@ import {
   ToggleLeft, ToggleRight, Lock, LogOut, Trash2, Plus, X, Loader2
 } from 'lucide-react'
 import { authApi, profilesApi } from '@/services/api'
+import { useAuth } from '@/hooks/useAuth'
 
 // ── Sidebar tabs ──────────────────────────────────────────────────────────────
 const tabs = [
@@ -75,6 +76,7 @@ function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function SettingsPage() {
+  const { updateUser } = useAuth()
   const [activeTab, setActiveTab]   = useState('profile')
   const [showPwd, setShowPwd]       = useState(false)
   const [saved, setSaved]           = useState(false)
@@ -165,6 +167,7 @@ export default function SettingsPage() {
         phone: phone,
         headline: headline
       })
+      updateUser({ profile: { full_name: `${firstName} ${lastName}`.trim(), phone, headline } })
       triggerSaveSuccess()
     } catch (err) {
       console.error("Failed to save profile", err)
@@ -190,6 +193,7 @@ export default function SettingsPage() {
           company_size: companySize
         }
       })
+      updateUser({ profile: { company_name: companyName, company_website: companyWebsite, bio: companyBio, parsed_data: { ...currentParsed, industry: companyIndustry, company_size: companySize } } })
       triggerSaveSuccess()
     } catch (err) {
       console.error("Failed to save company profile", err)
@@ -229,6 +233,7 @@ export default function SettingsPage() {
         const updated = await profilesApi.uploadAvatar(fd)
         if (updated.avatar_url) {
             setAvatarUrl(updated.avatar_url)
+            updateUser({ profile: { avatar_url: updated.avatar_url } })
         }
       } catch(err) {
         console.error("Avatar upload failed", err)
@@ -298,11 +303,26 @@ export default function SettingsPage() {
                 <div className="flex items-center gap-6 mb-8 pb-8 border-b border-surface-100">
                   <div className="relative">
                     <div className="w-20 h-20 bg-surface-100 rounded-2xl flex items-center justify-center text-2xl font-bold text-brand-700 font-display shadow-sm overflow-hidden relative border-2 border-surface-200">
-                      {avatarUrl.includes("avatar.png") ? (
-                        <span className="uppercase text-brand-700">{firstName?.[0] || 'U'}</span>
-                      ) : (
-                        <Image src={avatarUrl} alt="Avatar" fill style={{ objectFit: 'cover' }} />
-                      )}
+                      {avatarUrl && !avatarUrl.includes('/avatar.png') ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={avatarUrl}
+                          alt="Avatar"
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            // Fallback to initials if image fails to load
+                            e.currentTarget.style.display = 'none'
+                            const fallback = e.currentTarget.nextElementSibling as HTMLElement
+                            if (fallback) fallback.style.display = 'flex'
+                          }}
+                        />
+                      ) : null}
+                      <span
+                        className="uppercase text-brand-700 w-full h-full flex items-center justify-center"
+                        style={{ display: avatarUrl && !avatarUrl.includes('/avatar.png') ? 'none' : 'flex' }}
+                      >
+                        {firstName?.[0] || 'U'}
+                      </span>
                     </div>
                     <button onClick={() => avatarInputRef.current?.click()} className="absolute -bottom-1 -right-1 w-7 h-7 bg-brand-600 rounded-lg flex items-center justify-center shadow-md hover:bg-brand-700 transition-colors">
                       <Camera className="w-3.5 h-3.5 text-white" />
@@ -345,10 +365,10 @@ export default function SettingsPage() {
                 {/* Logo Stub */}
                 <div className="flex items-center gap-6 mb-8 pb-8 border-b border-surface-100">
                   <div className="w-20 h-20 rounded-2xl flex items-center justify-center text-3xl font-bold text-brand-700 bg-brand-50 font-display overflow-hidden border-2 border-surface-100 shadow-sm">
-                     {companyName ? companyName[0]?.toUpperCase() : 'B'}
+                     {companyName ? companyName[0]?.toUpperCase() : 'Y'}
                   </div>
                   <div>
-                    <div className="font-bold text-surface-900 text-lg">{companyName || 'Your Company Name'}</div>
+                    <div className="font-bold text-surface-900 text-lg">{companyName || 'Your Company'}</div>
                     <div className="text-sm text-surface-500 mb-3">Settings Dashboard</div>
                   </div>
                 </div>

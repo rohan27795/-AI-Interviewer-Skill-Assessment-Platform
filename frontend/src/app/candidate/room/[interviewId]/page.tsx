@@ -97,6 +97,8 @@ export default function InterviewRoom({ params }: { params: { interviewId: strin
 
   const aiSpeakingRef = useRef(false)
   const prevRoundRef = useRef<InterviewRound>('intro')
+  // Buffer the next round — only display it once AI starts speaking (first audio chunk)
+  const pendingRoundRef = useRef<InterviewRound | null>(null)
   const transcriptRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
 
@@ -157,6 +159,13 @@ export default function InterviewRoom({ params }: { params: { interviewId: strin
     // Mark AI as speaking
     setAiSpeaking(true)
     aiSpeakingRef.current = true
+
+    // If a round change was buffered, apply it now — the AI is about to ask the first
+    // question of the new round, so the header should update at this exact moment.
+    if (pendingRoundRef.current !== null) {
+      setCurrentRound(pendingRoundRef.current)
+      pendingRoundRef.current = null
+    }
 
     source.onended = () => {
       // Remove from active sources
@@ -270,7 +279,9 @@ export default function InterviewRoom({ params }: { params: { interviewId: strin
           // (accumulated on the backend and sent as transcript_update when done)
 
         } else if (t === 'round_change') {
-          setCurrentRound(msg.data.round as InterviewRound)
+          // Don't update the UI immediately — buffer until the AI starts speaking
+          // so the header indicator matches when the question is actually asked.
+          pendingRoundRef.current = msg.data.round as InterviewRound
 
         } else if (t === 'scores_update') {
           setScores(prev => ({ ...prev, ...msg.data }))
@@ -845,40 +856,137 @@ export default function InterviewRoom({ params }: { params: { interviewId: strin
         {/* ── Sidebar ── */}
         <div className="w-96 flex flex-col border-l border-white/5" style={{ background: 'rgba(13,15,22,0.8)' }}>
           <div className="flex border-b border-white/5">
-            <button className="flex-1 py-5 text-[10px] font-black uppercase tracking-widest text-brand-400 border-b-2 border-brand-500">Transcript</button>
-            <button className="flex-1 py-5 text-[10px] font-black uppercase tracking-widest text-white/30">Insights</button>
+            <button
+              onClick={() => setActivePanel('transcript')}
+              className={`flex-1 py-5 text-[10px] font-black uppercase tracking-widest transition-all ${activePanel === 'transcript' ? 'text-brand-400 border-b-2 border-brand-500' : 'text-white/30 hover:text-white/50'}`}
+            >Transcript</button>
+            <button
+              onClick={() => setActivePanel('insights')}
+              className={`flex-1 py-5 text-[10px] font-black uppercase tracking-widest transition-all ${activePanel === 'insights' ? 'text-brand-400 border-b-2 border-brand-500' : 'text-white/30 hover:text-white/50'}`}
+            >Insights</button>
           </div>
-          <div ref={transcriptRef} className="flex-1 overflow-y-auto p-6 space-y-6">
-            {transcript.map((msg, i) => (
-              <div key={i} className={`flex flex-col gap-2 ${msg.speaker === 'ai' ? 'items-start' : 'items-end'}`}>
-                <div className="text-[9px] font-black uppercase tracking-widest text-white/40">{msg.speaker === 'ai' ? 'HireAI' : 'You'}</div>
-                <div className={`px-5 py-4 rounded-2xl text-[13px] leading-relaxed transition-opacity duration-300 ${
-                  msg.speaker === 'ai'
-                    ? 'bg-brand-500/10 text-brand-50 border border-brand-500/20 rounded-tl-sm'
-                    : 'bg-surface-800 text-white rounded-tr-sm'
-                } ${msg.partial ? 'opacity-70 italic' : 'opacity-100'}`}>
-                  {msg.text}
-                  {msg.partial && <span className="inline-block w-1.5 h-3.5 bg-white/50 ml-1 animate-pulse rounded-sm align-middle" />}
+
+          {/* ── Transcript Panel ── */}
+          {activePanel === 'transcript' && (
+            <div ref={transcriptRef} className="flex-1 overflow-y-auto p-6 space-y-6">
+              {transcript.map((msg, i) => (
+                <div key={i} className={`flex flex-col gap-2 ${msg.speaker === 'ai' ? 'items-start' : 'items-end'}`}>
+                  <div className="text-[9px] font-black uppercase tracking-widest text-white/40">{msg.speaker === 'ai' ? 'HireAI' : 'You'}</div>
+                  <div className={`px-5 py-4 rounded-2xl text-[13px] leading-relaxed transition-opacity duration-300 ${
+                    msg.speaker === 'ai'
+                      ? 'bg-brand-500/10 text-brand-50 border border-brand-500/20 rounded-tl-sm'
+                      : 'bg-surface-800 text-white rounded-tr-sm'
+                  } ${msg.partial ? 'opacity-70 italic' : 'opacity-100'}`}>
+                    {msg.text}
+                    {msg.partial && <span className="inline-block w-1.5 h-3.5 bg-white/50 ml-1 animate-pulse rounded-sm align-middle" />}
+                  </div>
+                </div>
+              ))}
+              {candidateSpeaking && !aiSpeaking && (
+                <div className="flex gap-1.5 p-4 bg-emerald-500/5 rounded-xl border border-emerald-500/10 self-end">
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce" style={{ animationDelay: '0s' }} />
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce" style={{ animationDelay: '0.2s' }} />
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce" style={{ animationDelay: '0.4s' }} />
+                </div>
+              )}
+              {aiSpeaking && (
+                <div className="flex gap-1.5 p-4 bg-brand-500/5 rounded-xl border border-brand-500/10 self-start">
+                  <div className="w-1.5 h-1.5 rounded-full bg-brand-500 animate-bounce" style={{ animationDelay: '0s' }} />
+                  <div className="w-1.5 h-1.5 rounded-full bg-brand-500 animate-bounce" style={{ animationDelay: '0.2s' }} />
+                  <div className="w-1.5 h-1.5 rounded-full bg-brand-500 animate-bounce" style={{ animationDelay: '0.4s' }} />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Insights Panel ── */}
+          {activePanel === 'insights' && (
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+
+              {/* Live Score Rings */}
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-4">Live Performance</div>
+                <div className="flex items-center justify-around py-4 px-2 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <ScoreRing score={scores.technical} label="Technical" color="#6366f1" size={72} />
+                  <ScoreRing score={scores.communication} label="Comms" color="#22c55e" size={72} />
+                  <ScoreRing score={scores.confidence} label="Confidence" color="#f59e0b" size={72} />
+                </div>
+                <p className="text-[10px] text-white/20 text-center mt-2 font-medium">Scores update in real-time as you answer</p>
+              </div>
+
+              {/* Round Progress */}
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-3">Round Progress</div>
+                <div className="space-y-2">
+                  {rounds.map((r, i) => {
+                    const isDone = i < currentRoundIndex
+                    const isCurrent = r.id === currentRound
+                    const isPending = i > currentRoundIndex
+                    return (
+                      <div key={r.id} className="flex items-center gap-3 px-4 py-3 rounded-xl transition-all"
+                        style={{
+                          background: isCurrent ? `${r.color}15` : 'rgba(255,255,255,0.02)',
+                          border: isCurrent ? `1px solid ${r.color}40` : '1px solid rgba(255,255,255,0.04)',
+                        }}>
+                        <span className="text-base">{r.icon}</span>
+                        <span className={`flex-1 text-xs font-bold ${isCurrent ? 'text-white' : isDone ? 'text-white/40 line-through' : 'text-white/20'}`}>
+                          {r.label}
+                        </span>
+                        {isDone && <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Done ✓</span>}
+                        {isCurrent && <span className="text-[10px] font-black uppercase tracking-widest animate-pulse" style={{ color: r.color }}>Live</span>}
+                        {isPending && <span className="text-[10px] font-black text-white/20 uppercase tracking-widest">Upcoming</span>}
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
-            ))}
-            {/* Candidate speaking indicator */}
-            {candidateSpeaking && !aiSpeaking && (
-              <div className="flex gap-1.5 p-4 bg-emerald-500/5 rounded-xl border border-emerald-500/10 self-end">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce" style={{ animationDelay: '0s' }} />
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce" style={{ animationDelay: '0.2s' }} />
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce" style={{ animationDelay: '0.4s' }} />
+
+              {/* AI Tips */}
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-3">AI Tips</div>
+                <div className="space-y-2">
+                  {[
+                    { icon: '🎯', tip: 'Give specific examples (STAR method)' },
+                    { icon: '🗣️', tip: 'Speak clearly and at a steady pace' },
+                    { icon: '⏱️', tip: 'Keep answers between 1–2 minutes' },
+                    { icon: '💡', tip: 'Ask clarifying questions if needed' },
+                  ].map(({ icon, tip }) => (
+                    <div key={tip} className="flex items-start gap-3 px-4 py-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                      <span className="text-sm mt-0.5">{icon}</span>
+                      <span className="text-[12px] text-white/40 font-medium leading-relaxed">{tip}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            )}
-            {/* AI speaking indicator */}
-            {aiSpeaking && (
-              <div className="flex gap-1.5 p-4 bg-brand-500/5 rounded-xl border border-brand-500/10 self-start">
-                <div className="w-1.5 h-1.5 rounded-full bg-brand-500 animate-bounce" style={{ animationDelay: '0s' }} />
-                <div className="w-1.5 h-1.5 rounded-full bg-brand-500 animate-bounce" style={{ animationDelay: '0.2s' }} />
-                <div className="w-1.5 h-1.5 rounded-full bg-brand-500 animate-bounce" style={{ animationDelay: '0.4s' }} />
+
+              {/* Integrity Status */}
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-3">Session Integrity</div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between px-4 py-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                    <span className="text-xs text-white/50 font-semibold">Tab Switches</span>
+                    <span className={`text-xs font-black px-2.5 py-1 rounded-lg ${tabStatus.switchCount === 0 ? 'bg-emerald-500/10 text-emerald-400' : tabStatus.severity === 'critical' ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/10 text-amber-400'}`}>
+                      {tabStatus.switchCount} {tabStatus.switchCount === 0 ? '✓ Clean' : `⚠ Strike${tabStatus.switchCount > 1 ? 's' : ''}`}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between px-4 py-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                    <span className="text-xs text-white/50 font-semibold">Camera</span>
+                    <span className={`text-xs font-black px-2.5 py-1 rounded-lg ${proctorStatus.isWarning ? 'bg-red-500/20 text-red-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
+                      {proctorStatus.isWarning ? `⚠ ${proctorStatus.message.split(':')[1]?.trim() || 'Alert'}` : `✓ ${proctorStatus.facesDetected} face detected`}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between px-4 py-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                    <span className="text-xs text-white/50 font-semibold">Session Time</span>
+                    <span className="text-xs font-black px-2.5 py-1 rounded-lg bg-brand-500/10 text-brand-400">
+                      {formatTime(elapsed)}
+                    </span>
+                  </div>
+                </div>
               </div>
-            )}
-          </div>
+
+            </div>
+          )}
+
         </div>
       </div>
     </div>

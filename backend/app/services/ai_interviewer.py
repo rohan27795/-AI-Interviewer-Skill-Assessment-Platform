@@ -110,22 +110,27 @@ Rules:
 You are HireAI conducting the OFFER & COMPENSATION DISCUSSION phase.
 
 Role: {job_title}
-Company budget for this role: {salary_min} to {salary_max} LPA
-Candidate's expected salary (from profile): {expected_salary} LPA
+{salary_context}
+Candidate's expected salary (from profile): {expected_salary}
 
 Your goals:
 1. Transition smoothly: "We are in the final stage — let's talk about compensation."
 2. Ask for the candidate's current/expected CTC if not already stated.
-3. Present the company's approved range: {salary_min} to {salary_max} LPA — professionally and transparently.
-4. You CANNOT offer above {salary_max} LPA under any circumstances.
-5. Discuss other components if needed: joining bonus, ESOPs, variable pay, remote flexibility, learning budget.
-6. Reach a documented conclusion: agreement, counter-offer noted, or acknowledged gap.
-7. Close the interview warmly: thank them, explain next steps, and end the session professionally.
+3. Follow the salary context above for how to handle the budget discussion.
+4. Discuss other components if relevant: joining bonus, ESOPs, variable pay, remote flexibility, learning budget.
+5. Reach a documented conclusion: agreement, counter-offer noted, or acknowledged gap.
+6. MANDATORY FINAL STEP — No matter how the discussion ends, you MUST close the interview with a warm, professional farewell:
+   - Thank the candidate by name for their time.
+   - Tell them the hiring team will review the assessment and follow up within 3–5 business days.
+   - Wish them well. End positively.
+   - Example: "Thank you so much [Name], it was a pleasure speaking with you today. Our hiring team will review your assessment and be in touch within 3 to 5 business days. We appreciate your time and wish you all the best!"
 
 Rules:
 - Be respectful — this is a discussion, not a confrontation.
 - Do NOT reveal compensation for other candidates or roles.
+- NEVER say the budget is "zero" or "0 LPA" — if no budget is set, keep it flexible and open.
 - Keep it factual and structured.
+- Always end the session with a proper farewell — do not let the interview end abruptly.
 """,
 }
 
@@ -199,6 +204,44 @@ class InterviewStateMachine:
         smin = int(self.job_data.get("salary_min") or 0)
         smax = int(self.job_data.get("salary_max") or 0)
 
+        # ── Salary context: guard against 0/null salary data ──────────────────
+        # If the recruiter never set a salary range, do NOT present "0 LPA" as
+        # the budget — instead, run a flexible open negotiation.
+        if smin > 0 or smax > 0:
+            smin_lpa = smin // 100000
+            smax_lpa = smax // 100000
+            salary_context = (
+                f"Company budget for this role: {smin_lpa} to {smax_lpa} LPA.\n"
+                f"Present this range professionally and transparently.\n"
+                f"You CANNOT offer above {smax_lpa} LPA under any circumstances."
+            )
+        else:
+            # No salary range set by recruiter — use flexible, honest language.
+            # IMPORTANT: Do NOT offer specific benefits (bonuses, ESOPs, remote policy)
+            # because the AI has no real data on them. Offering them and then saying
+            # "we don't have that defined" is worse than not mentioning them at all.
+            salary_context = (
+                "The specific compensation budget has not been disclosed for this role.\n"
+                "Do NOT mention any specific number or range — especially never say '0 LPA'.\n"
+                "Do NOT proactively offer or promise specific benefits such as bonuses, ESOPs,\n"
+                "stock options, or remote work policies — you have no verified data on these\n"
+                "and making promises you cannot back up damages candidate trust.\n"
+                "Instead, take a discovery approach to help the hiring team:\n"
+                "1. Ask the candidate what their CTC expectations are and acknowledge them respectfully.\n"
+                "2. Ask one follow-up question to understand their priorities beyond base salary "
+                "(e.g., 'Beyond base salary, what other factors are important to you—things like "
+                "performance bonuses, equity, remote flexibility, or learning budget?').\n"
+                "3. Acknowledge their preferences and let them know the hiring team will take "
+                "these into account when preparing the final compensation package."
+            )
+
+        # ── Expected salary: format cleanly ───────────────────────────────────
+        raw_exp = self.resume_data.get("expected_salary", "")
+        if raw_exp and str(raw_exp).strip() not in ("", "unknown", "null", "None"):
+            expected_salary_str = f"{raw_exp} LPA (from candidate profile)"
+        else:
+            expected_salary_str = "Not specified — ask the candidate directly."
+
         fmt_kwargs = dict(
             resume_data=json.dumps(self.resume_data, indent=2),
             job_title=(self.job_data.get("title") or "this role").strip(),
@@ -208,9 +251,8 @@ class InterviewStateMachine:
                 indent=2,
             ),
             key_skills=self._job_skills_text(),
-            salary_min=smin // 100000,
-            salary_max=smax // 100000,
-            expected_salary=self.resume_data.get("expected_salary", "unknown"),
+            salary_context=salary_context,
+            expected_salary=expected_salary_str,
         )
         body = _format_phase_template(template, **fmt_kwargs)
         return self._session_preamble() + "\n\n" + body

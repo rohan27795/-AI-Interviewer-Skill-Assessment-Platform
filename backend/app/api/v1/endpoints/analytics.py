@@ -267,7 +267,7 @@ async def get_analytics_metrics(current_user: dict = Depends(get_current_user), 
     if not job_ids:
         job_ids = ["00000000-0000-0000-0000-000000000000"]
         
-    apps_res = supabase.table("applications").select("id, status, ai_score, job_id, jobs(title, department, is_active)").in_("job_id", job_ids).execute()
+    apps_res = supabase.table("applications").select("id, status, ai_score, created_at, job_id, jobs(title, department, is_active)").in_("job_id", job_ids).execute()
     
     # Pipeline stages
     applied = len(apps_res.data)

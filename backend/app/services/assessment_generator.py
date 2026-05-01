@@ -115,7 +115,7 @@ Generate a JSON assessment with this EXACT schema:
     }}
   ],
 
-  "hiring_recommendation": "1-2 paragraph recommendation for the recruiter",
+  "hiring_recommendation": "1-2 paragraph recommendation for the recruiter. The sentence MUST be grammatically complete and self-contained. Use a full phrase such as: 'I recommend moving forward with this candidate' OR 'I do not recommend moving forward with this candidate' OR 'I recommend against proceeding with this candidate'. Never write a fragment like 'I would recommend with this candidate' — always include the direction word (moving forward / against / proceeding). Do not omit critical words.",
   "suggested_onboarding_notes": "string or empty"
 }}
 
@@ -324,6 +324,9 @@ class AssessmentGeneratorService:
                 assessment["problem_solving_score"] = None
             if not analysis["has_behavioral"]:
                 assessment["behavioral_score"] = None
+            # cultural_fit can come from intro OR behavioral round signals.
+            # Only null it out if NEITHER the intro nor the behavioral round occurred.
+            if not analysis["has_behavioral"] and not analysis["has_intro"]:
                 assessment["cultural_fit_score"] = None
 
             # ── Weighted overall_score (renormalized over scored dims only) ──
@@ -385,6 +388,8 @@ class AssessmentGeneratorService:
             return assessment
 
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             logger.error(f"Assessment generation failed: {e}")
             return self._fallback_assessment(
                 interview_id, transcript, proctoring_logs or [], analysis, termination_reason
@@ -393,6 +398,13 @@ class AssessmentGeneratorService:
     # ── Verdict helpers ───────────────────────────────────────────────────────
 
     def _compute_verdict_from_score(self, score: float) -> str:
+        """
+        Score-to-verdict mapping.
+        85+  → strong_hire    (top tier)
+        70+  → hire           (clearly qualified)
+        50+  → no_hire        (borderline — recruiter may still review)
+        <50  → strong_no_hire (significant gaps)
+        """
         if score >= 85:
             return HireVerdict.STRONG_HIRE.value
         elif score >= 70:
@@ -809,11 +821,11 @@ async def generate_assessment(
                 overall_score=int(assessment_data.get("overall_score") or 0),
                 verdict=verdict,
                 dashboard_link=dashboard_link,
-                technical_score=int(assessment_data.get("technical_score") or 0),
-                behavioral_score=int(assessment_data.get("behavioral_score") or 0),
-                communication_score=int(assessment_data.get("communication_score") or 0),
-                cultural_fit_score=int(assessment_data.get("cultural_fit_score") or 0),
-                problem_solving_score=int(assessment_data.get("problem_solving_score") or 0),
+                technical_score=int(assessment_data["technical_score"]) if assessment_data.get("technical_score") is not None else None,
+                behavioral_score=int(assessment_data["behavioral_score"]) if assessment_data.get("behavioral_score") is not None else None,
+                communication_score=int(assessment_data["communication_score"]) if assessment_data.get("communication_score") is not None else None,
+                cultural_fit_score=int(assessment_data["cultural_fit_score"]) if assessment_data.get("cultural_fit_score") is not None else None,
+                problem_solving_score=int(assessment_data["problem_solving_score"]) if assessment_data.get("problem_solving_score") is not None else None,
                 security_summary=shield_line or "No critical AI Shield alerts.",
             )
 

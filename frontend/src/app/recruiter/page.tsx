@@ -14,13 +14,14 @@ import { analyticsApi } from '@/services/api'
 import { supabase } from '@/lib/supabaseClient'
 
 const statusConfig: Record<string, { label: string; bg: string; color: string }> = {
-  shortlisted: { label: 'Shortlisted', bg: 'rgba(59,130,246,0.1)',  color: '#3b82f6' },
-  interviewed:  { label: 'Interviewed', bg: 'rgba(168,85,247,0.1)', color: '#a855f7' },
-  'in-review':  { label: 'In Review',   bg: 'rgba(245,158,11,0.1)', color: '#f59e0b' },
-  offer:        { label: 'Offer Sent',  bg: 'rgba(34,197,94,0.1)',  color: '#22c55e' },
-  rejected:     { label: 'Rejected',    bg: 'rgba(239,68,68,0.09)', color: '#ef4444' },
   applied:      { label: 'Applied',     bg: 'rgba(100,116,139,0.1)',color: '#64748b' },
+  screening:    { label: 'Screening',   bg: 'rgba(245,158,11,0.1)', color: '#f59e0b' },
   invited:      { label: 'Invited',     bg: 'rgba(14,165,233,0.1)', color: '#0ea5e9' },
+  scheduled:    { label: 'Scheduled',   bg: 'rgba(99,102,241,0.1)', color: '#6366f1' },
+  interviewing: { label: 'Interviewing',bg: 'rgba(168,85,247,0.1)', color: '#a855f7' },
+  interviewed:  { label: 'Interviewed', bg: 'rgba(217,70,239,0.1)', color: '#d946ef' },
+  offered:      { label: 'Offered',     bg: 'rgba(34,197,94,0.1)',  color: '#22c55e' },
+  rejected:     { label: 'Rejected',    bg: 'rgba(239,68,68,0.09)', color: '#ef4444' },
 }
 
 const getIconComp = (iconName: string) => {
@@ -200,21 +201,23 @@ export default function RecruiterDashboard() {
                     <div className="font-semibold text-surface-900 text-sm">{c.name}</div>
                     <div className="text-xs text-surface-600 font-medium truncate">{c.role}</div>
                   </div>
-                  <div className="text-center">
-                    <div className={`text-lg font-bold font-display ${c.score >= 85 ? 'text-green-600' : c.score >= 70 ? 'text-amber-500' : 'text-red-500'}`}>
-                      {c.score > 0 ? c.score : '-'}
+                  <div className="w-14 text-right shrink-0">
+                    <div className={`text-lg font-bold font-display leading-none ${c.score >= 70 ? 'text-green-600' : c.score >= 50 ? 'text-amber-500' : 'text-red-500'}`}>
+                      {c.score > 0 ? Math.round(c.score) : '-'}
                     </div>
-                    <div className="text-[10px] text-surface-500 font-bold uppercase tracking-widest">score</div>
+                    <div className="text-[9px] text-surface-500 font-bold uppercase tracking-widest mt-1">score</div>
                   </div>
-                  <span
-                    className="badge"
-                    style={{ background: statusConfig[c.status]?.bg || statusConfig['applied'].bg, color: statusConfig[c.status]?.color || statusConfig['applied'].color }}
-                  >
-                    {statusConfig[c.status]?.label || c.status}
-                  </span>
-                  <div className="text-xs text-surface-500 font-semibold hidden sm:block">{c.time}</div>
+                  <div className="w-24 shrink-0 flex justify-center">
+                    <span
+                      className="badge w-full text-center block"
+                      style={{ background: statusConfig[c.status]?.bg || statusConfig['applied'].bg, color: statusConfig[c.status]?.color || statusConfig['applied'].color }}
+                    >
+                      {statusConfig[c.status]?.label || c.status}
+                    </span>
+                  </div>
+                  <div className="text-xs text-surface-500 font-semibold hidden sm:block w-16 text-right shrink-0">{c.time}</div>
                   <Link href={`/recruiter/candidates?q=${c.name}`}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity ml-2">
+                    className="opacity-0 group-hover:opacity-100 transition-opacity w-5 flex justify-end shrink-0">
                     <ArrowRight className="w-4 h-4 text-indigo-500" />
                   </Link>
                 </div>

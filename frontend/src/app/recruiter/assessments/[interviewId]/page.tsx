@@ -1,13 +1,13 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import {
     ArrowLeft, CheckCircle, TrendingUp,
-    Clock, Mail, Loader2, AlertCircle,
+    Clock, Loader2, AlertCircle,
     Shield, AlertTriangle, Send, BarChart3,
-    Target, Brain, ChevronRight, Star,
-    Flag, Zap, User, Award
+    Target, Brain, ChevronRight,
+    Flag, Zap, Award, MessageSquare, Bot, Search
 } from 'lucide-react'
 import axios from 'axios'
 import { getApiUrl } from '@/lib/api'
@@ -156,6 +156,14 @@ function RoundCard({ round }: { round: any }) {
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
+// ── Round config for transcript ────────────────────────────────────────────────
+const ROUND_META: Record<string, { label: string; icon: string; color: string; bg: string; border: string }> = {
+    intro:      { label: 'Introduction', icon: '👋', color: '#6366f1', bg: 'bg-indigo-50',  border: 'border-indigo-200' },
+    technical:  { label: 'Technical',    icon: '💻', color: '#a855f7', bg: 'bg-purple-50',  border: 'border-purple-200' },
+    behavioral: { label: 'Behavioural',  icon: '🧠', color: '#f59e0b', bg: 'bg-amber-50',   border: 'border-amber-200'  },
+    salary:     { label: 'Discussion',   icon: '💰', color: '#22c55e', bg: 'bg-emerald-50', border: 'border-emerald-200'},
+}
+
 export default function HRAssessmentPage({ params }: { params: { interviewId: string } }) {
     const [activeTab, setActiveTab] = useState('overview')
     const [loading, setLoading] = useState(true)
@@ -165,6 +173,10 @@ export default function HRAssessmentPage({ params }: { params: { interviewId: st
     const [offerSent, setOfferSent] = useState(false)
     const [offerError, setOfferError] = useState<string | null>(null)
     const [offerEmail, setOfferEmail] = useState<string | null>(null)
+    const [transcript, setTranscript] = useState<any[]>([])
+    const [transcriptLoading, setTranscriptLoading] = useState(false)
+    const [transcriptError, setTranscriptError] = useState<string | null>(null)
+    const [transcriptSearch, setTranscriptSearch] = useState('')
 
     useEffect(() => {
         const fetchAssessment = async () => {
@@ -189,6 +201,27 @@ export default function HRAssessmentPage({ params }: { params: { interviewId: st
     useEffect(() => {
         if (assessment?.detailed_report?.offer_sent) { setOfferSent(true) }
     }, [assessment])
+
+    const fetchTranscript = useCallback(async () => {
+        if (transcript.length > 0) return // already loaded
+        setTranscriptLoading(true); setTranscriptError(null)
+        try {
+            const token = localStorage.getItem('hireai_token')
+            const res = await axios.get(
+                `${getApiUrl()}/api/v1/assessments/${params.interviewId}/transcript`,
+                { headers: { Authorization: `Bearer ${token}` } }
+            )
+            setTranscript(res.data.transcript || [])
+        } catch {
+            setTranscriptError('Could not load transcript. Please try again.')
+        } finally {
+            setTranscriptLoading(false)
+        }
+    }, [params.interviewId, transcript.length])
+
+    useEffect(() => {
+        if (activeTab === 'transcript') fetchTranscript()
+    }, [activeTab, fetchTranscript])
 
     const handleSendOffer = async () => {
         setSendingOffer(true); setOfferError(null)
@@ -656,21 +689,163 @@ export default function HRAssessmentPage({ params }: { params: { interviewId: st
                 )}
 
                 {/* ════════════════════ TRANSCRIPT TAB ════════════════════ */}
-                {activeTab === 'transcript' && (
-                    <div className="bg-white rounded-2xl border border-surface-100 shadow-card p-6">
-                        <h2 className="font-black text-surface-900 mb-4 flex items-center gap-2">
-                            <Brain className="w-4 h-4 text-brand-600" /> Interview Transcript
-                        </h2>
-                        <div className="bg-surface-50 rounded-2xl border border-surface-100 p-6 text-center">
-                            <p className="text-sm text-surface-500 font-medium">
-                                This assessment processed <strong>{dr.total_turns_assessed || dr.transcript_turns || 0}</strong> transcript turns.
-                            </p>
-                            <p className="text-sm text-surface-400 mt-2">
-                                Full transcript is stored securely and available via the API endpoint for compliance and audit purposes.
-                            </p>
+                {activeTab === 'transcript' && (() => {
+                    // Group turns by round
+                    const rounds = Object.keys(ROUND_META)
+                    type Group = { round: string; turns: any[] }
+                    const groups: Group[] = []
+                    let filteredTurns = transcript
+                    if (transcriptSearch.trim()) {
+                        filteredTurns = transcript.filter(t =>
+                            (t.text || '').toLowerCase().includes(transcriptSearch.toLowerCase())
+                        )
+                    }
+                    filteredTurns.forEach(turn => {
+                        const r = (turn.round || 'intro').toLowerCase()
+                        const last = groups[groups.length - 1]
+                        if (!last || last.round !== r) groups.push({ round: r, turns: [turn] })
+                        else last.turns.push(turn)
+                    })
+
+                    return (
+                        <div className="space-y-4">
+                            {/* Header */}
+                            <div className="bg-white rounded-2xl border border-surface-100 shadow-card p-5">
+                                <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-9 h-9 rounded-xl bg-brand-50 flex items-center justify-center">
+                                            <MessageSquare className="w-4 h-4 text-brand-600" />
+                                        </div>
+                                        <div>
+                                            <h2 className="font-black text-surface-900">Interview Transcript</h2>
+                                            <p className="text-xs text-surface-400 font-medium mt-0.5">
+                                                {transcript.length} total turns · {candidateName} × {jobTitle}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    {/* Search */}
+                                    <div className="sm:ml-auto flex items-center gap-2 bg-surface-50 border border-surface-200 rounded-xl px-3 py-2">
+                                        <Search className="w-3.5 h-3.5 text-surface-400 shrink-0" />
+                                        <input
+                                            value={transcriptSearch}
+                                            onChange={e => setTranscriptSearch(e.target.value)}
+                                            placeholder="Search transcript…"
+                                            className="bg-transparent text-sm text-surface-700 placeholder:text-surface-400 focus:outline-none w-44"
+                                        />
+                                    </div>
+                                </div>
+                                {/* Round pills */}
+                                <div className="flex flex-wrap gap-2 mt-4">
+                                    {Object.entries(ROUND_META).map(([key, meta]) => {
+                                        const count = transcript.filter(t => (t.round || '').toLowerCase() === key).length
+                                        return (
+                                            <span key={key} className={`inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-full border ${meta.bg} ${meta.border}`}
+                                                style={{ color: meta.color }}>
+                                                {meta.icon} {meta.label}
+                                                <span className="opacity-60">·</span>
+                                                <span className="opacity-70">{count} turns</span>
+                                            </span>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+
+                            {/* Loading / Error */}
+                            {transcriptLoading && (
+                                <div className="flex items-center justify-center gap-3 py-16 bg-white rounded-2xl border border-surface-100">
+                                    <Loader2 className="w-5 h-5 animate-spin text-brand-500" />
+                                    <span className="text-sm font-semibold text-surface-500">Loading transcript…</span>
+                                </div>
+                            )}
+                            {transcriptError && (
+                                <div className="flex items-center gap-3 p-5 bg-red-50 border border-red-200 rounded-2xl">
+                                    <AlertCircle className="w-5 h-5 text-red-500 shrink-0" />
+                                    <span className="text-sm text-red-700 font-medium">{transcriptError}</span>
+                                    <button onClick={() => { setTranscript([]); fetchTranscript() }}
+                                        className="ml-auto text-xs font-bold text-red-600 hover:underline">Retry</button>
+                                </div>
+                            )}
+
+                            {/* Conversation grouped by round */}
+                            {!transcriptLoading && !transcriptError && groups.length === 0 && (
+                                <div className="flex flex-col items-center py-16 bg-white rounded-2xl border border-surface-100 text-surface-400">
+                                    <MessageSquare className="w-10 h-10 mb-3 text-surface-200" />
+                                    <p className="font-bold text-surface-500 text-sm">
+                                        {transcriptSearch ? 'No results found' : 'No transcript available'}
+                                    </p>
+                                    <p className="text-xs mt-1">
+                                        {transcriptSearch ? 'Try a different search term' : 'The interview may have ended before any turns were recorded'}
+                                    </p>
+                                </div>
+                            )}
+
+                            {!transcriptLoading && groups.map((group, gi) => {
+                                const meta = ROUND_META[group.round] || ROUND_META.intro
+                                return (
+                                    <div key={gi} className="bg-white rounded-2xl border border-surface-100 shadow-card overflow-hidden">
+                                        {/* Round header */}
+                                        <div className={`flex items-center gap-2.5 px-5 py-3 border-b ${meta.bg} ${meta.border}`}>
+                                            <span className="text-base">{meta.icon}</span>
+                                            <span className="text-xs font-black uppercase tracking-widest" style={{ color: meta.color }}>
+                                                {meta.label} Round
+                                            </span>
+                                            <span className="ml-auto text-[10px] font-bold text-surface-400">
+                                                {group.turns.length} turn{group.turns.length !== 1 ? 's' : ''}
+                                            </span>
+                                        </div>
+
+                                        {/* Turns */}
+                                        <div className="p-5 space-y-4">
+                                            {group.turns.map((turn, ti) => {
+                                                const isAI = turn.speaker === 'ai'
+                                                const ts = turn.timestamp
+                                                    ? new Date(turn.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                                    : ''
+                                                return (
+                                                    <div key={ti} className={`flex gap-3 ${ isAI ? '' : 'flex-row-reverse'}`}>
+                                                        {/* Avatar */}
+                                                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 text-white text-xs font-black
+                                                            ${ isAI ? 'bg-gradient-to-br from-brand-500 to-accent-500' : 'bg-gradient-to-br from-surface-600 to-surface-800'}`}>
+                                                            {isAI ? <Bot className="w-4 h-4" /> : candidateName.charAt(0).toUpperCase()}
+                                                        </div>
+                                                        {/* Bubble */}
+                                                        <div className={`max-w-[75%] ${ isAI ? '' : 'items-end'} flex flex-col gap-1`}>
+                                                            <div className={`flex items-center gap-2 ${ isAI ? '' : 'flex-row-reverse'}`}>
+                                                                <span className="text-[11px] font-black text-surface-600">
+                                                                    {isAI ? 'HireAI' : candidateName}
+                                                                </span>
+                                                                {ts && <span className="text-[10px] text-surface-300 font-medium">{ts}</span>}
+                                                            </div>
+                                                            <div className={`px-4 py-3 rounded-2xl text-sm leading-relaxed font-medium
+                                                                ${ isAI
+                                                                    ? 'bg-surface-50 border border-surface-100 text-surface-800 rounded-tl-sm'
+                                                                    : 'text-white rounded-tr-sm'}
+                                                            `} style={!isAI ? { background: meta.color } : {}}>
+                                                                {transcriptSearch
+                                                                    ? turn.text.replace(
+                                                                        new RegExp(`(${transcriptSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'),
+                                                                        (m: string) => `__MARK__${m}__ENDMARK__`
+                                                                      ).split('__MARK__').map((part: string, pi: number) => {
+                                                                        if (part.includes('__ENDMARK__')) {
+                                                                            const [highlight, rest] = part.split('__ENDMARK__')
+                                                                            return <span key={pi}><mark className="bg-yellow-200 text-yellow-900 rounded px-0.5">{highlight}</mark>{rest}</span>
+                                                                        }
+                                                                        return <span key={pi}>{part}</span>
+                                                                      })
+                                                                    : turn.text
+                                                                }
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )
+                                            })}
+                                        </div>
+                                    </div>
+                                )
+                            })}
                         </div>
-                    </div>
-                )}
+                    )
+                })()}
             </div>
         </div>
     )

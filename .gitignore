@@ -83,6 +83,7 @@ _agent/
 brain/
 
 # Project-specific excludes
+langfuse_guide.md.resolved
 BRD_and_Architecture_Detailed.md
 BRD.md
 Architecture_Reference_Guide.md
@@ -117,3 +118,13 @@ backend/db/chroma.sqlite3
 walkthrough.md
 infra/terraform/tfplan
 
+
+# Added tests
+backend/test_analytics.py
+backend/test_assessment.py
+backend/test_db_data.py
+login_test.json
+scratch_test_auth.py
+test_login_api.py
+test_login_success.py
+test_register_api.py

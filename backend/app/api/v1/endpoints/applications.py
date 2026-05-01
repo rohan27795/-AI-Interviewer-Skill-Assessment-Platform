@@ -421,9 +421,9 @@ async def list_applications(
         if not job_ids:
             return []
             
-        query = supabase.table("applications").select("*, jobs(title, location), users(email)").in_("job_id", job_ids)
+        query = supabase.table("applications").select("*, jobs(title, location), users(email), interviews(scheduled_at)").in_("job_id", job_ids)
     else:
-        query = supabase.table("applications").select("*, jobs(title, location), users(email)")
+        query = supabase.table("applications").select("*, jobs(title, location), users(email), interviews(scheduled_at)")
     
     if job_id: query = query.eq("job_id", job_id)
     if status: query = query.eq("status", status)

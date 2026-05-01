@@ -219,8 +219,8 @@ export default function AnalyticsPage() {
                 <div className="w-28 text-sm font-semibold text-surface-700 flex-shrink-0">{p.stage}</div>
                 <div className="flex-1 h-8 bg-surface-50 rounded-xl overflow-hidden relative">
                   <div
-                    className={`h-full ${p.color} rounded-xl transition-all duration-700 flex items-center justify-end pr-3`}
-                    style={{ width: `${Math.max(p.pct, 2)}%` }} // make sure it always renders slightly so we see colors
+                    className={`h-full ${p.count > 0 ? p.color : 'bg-transparent'} rounded-xl transition-all duration-700 flex items-center justify-end ${p.count > 0 ? 'pr-3' : ''}`}
+                    style={{ width: `${p.count > 0 ? Math.max(p.pct, 2) : 0}%` }} 
                   >
                     {p.pct > 10 && <span className="text-xs font-bold text-white">{p.pct}%</span>}
                   </div>

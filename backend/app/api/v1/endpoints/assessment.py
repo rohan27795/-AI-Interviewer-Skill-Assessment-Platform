@@ -72,6 +72,45 @@ async def get_assessment(
     return JSONResponse(content=_enrich_from_detailed_report(row))
 
 
+@router.get("/{interview_id}/transcript")
+async def get_interview_transcript(
+    interview_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Fetch the raw interview transcript for a recruiter.
+    Returns the ordered list of turns from the interviews table.
+    """
+    if current_user["role"] not in ("recruiter", "admin"):
+        raise HTTPException(status_code=403, detail="Recruiter access required.")
+
+    supabase = get_supabase()
+    try:
+        res = await asyncio.to_thread(
+            lambda: supabase.table("interviews")
+            .select("transcript")
+            .eq("id", interview_id)
+            .maybe_single()
+            .execute()
+        )
+        row = res.data if res else None
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Interview not found.")
+
+    transcript = row.get("transcript") or []
+    if isinstance(transcript, str):
+        import json as _json
+        try:
+            transcript = _json.loads(transcript)
+        except Exception:
+            transcript = []
+
+    return JSONResponse(content={"transcript": transcript, "total_turns": len(transcript)})
+
+
 @router.post("/{interview_id}/regenerate")
 async def regenerate_assessment(
     interview_id: str,
@@ -127,14 +166,27 @@ async def regenerate_assessment(
         except Exception:
             proctoring_logs = []
 
-    # 3. Trigger regeneration
+    # 3. Trigger regeneration — derive termination_reason from the interview's stored status
+    raw_status = interview_data.get("termination_reason") or interview_data.get("status") or "completed"
+    # Map DB status values → assessment termination_reason tokens
+    status_map = {
+        "completed": "completed",
+        "tab_guard": "tab_guard",
+        "early_exit": "early_exit",
+        # Fallbacks for other DB statuses
+        "cancelled": "tab_guard",
+        "in_progress": "early_exit",
+    }
+    termination_reason = status_map.get(raw_status, "completed")
+    logger.info(f"[Regenerate] interview={interview_id} raw_status={raw_status!r} → termination_reason={termination_reason!r}")
+
     from app.services.assessment_generator import generate_assessment
     asyncio.create_task(
         generate_assessment(
             interview_id,
             transcript,
             proctoring_logs,
-            termination_reason="early_exit",  # re-assess as early exit
+            termination_reason=termination_reason,
         )
     )
 

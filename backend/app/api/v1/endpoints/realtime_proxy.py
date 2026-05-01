@@ -72,8 +72,29 @@ PHASE_MIN_TURNS: Dict[str, int] = {
     "intro":       3,
     "technical":   6,
     "behavioral":  3,
-    "salary":      2,
+    "salary":      3,  # Raised from 2 → 3: ask expectation + discuss + close farewell
 }
+
+# ── STT hallucination filter ─────────────────────────────────────────────────
+# Whisper (and most VAD-based STT systems) hallucinate these words during
+# silence, breath sounds, or background noise. We silently drop any candidate
+# turn whose *entire* content is one of these phrases so the AI never receives
+# or reacts to them, and they never pollute the transcript.
+STT_FILLER_PHRASES = frozenset({
+    "thank you", "thank you.", "thanks", "thanks.",
+    "bye", "bye.", "bye-bye", "bye-bye.", "goodbye", "goodbye.",
+    "okay", "okay.", "ok", "ok.",
+    "yeah", "yeah.", "yes", "yes.",
+    "hmm", "hmm.", "hm", "hm.",
+    "uh", "uh.", "um", "um.",
+    "carry on", "carry on.", "continue", "continue.",
+    ".", "", " ",
+})
+
+
+def _is_stt_hallucination(text: str) -> bool:
+    """Return True if the transcribed text is a known STT silence artifact."""
+    return text.strip().lower() in STT_FILLER_PHRASES
 
 
 class RealtimeInterviewSession:
@@ -334,12 +355,14 @@ def _build_session_config(state_machine: InterviewStateMachine) -> Dict[str, Any
             },
             "turn_detection": {
                 "type": "server_vad",
-                "threshold": 0.8,  # Increased from 0.5 to avoid triggering on background noise/breaths
+                "threshold": 0.8,  # High threshold: ignore breath/background noise
                 "prefix_padding_ms": 300,
-                "silence_duration_ms": 1200,  # Increased to prevent cutting off candidate mid-thought
+                "silence_duration_ms": 1500,  # Raised: give candidate more time before VAD cuts off
             },
             "temperature": 0.6,  # OpenAI Realtime API minimum is 0.6
-            "max_response_output_tokens": 350,
+            # Raised from 350 → 600 so the AI never gets cut off mid-sentence.
+            # At ~4 tokens/word a 600-token budget = ~150 words, plenty for one interview turn.
+            "max_response_output_tokens": 600,
         },
     }
 
@@ -589,6 +612,14 @@ async def realtime_interview(
                     session._partial_candidate_text = ""
                     session._pending_candidate_item_id = None
                     if candidate_text:
+                        # ── STT hallucination filter ──────────────────────
+                        # Drop known silence artifacts ("Bye", "Thank you", etc.)
+                        # so the AI never reacts to them and they stay out of the
+                        # transcript entirely.
+                        if _is_stt_hallucination(candidate_text):
+                            print(f"[Realtime][{interview_id}] STT filler dropped: '{candidate_text}'")
+                            continue
+                        # ─────────────────────────────────────────────────
                         print(f"[Realtime][{interview_id}] Candidate said: {candidate_text[:100]}")
                         session.add_transcript("candidate", candidate_text)
                         await websocket.send_json({
