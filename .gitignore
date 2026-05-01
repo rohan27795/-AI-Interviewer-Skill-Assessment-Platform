@@ -114,6 +114,8 @@ langfuse_guide.md.resolved
 
 # Unnecessary files for new repo
 Euron_AWS_Deployment_Bible_v1.0.docx.pdf
+Euron_AWS_Deployment_Bible_v1.0(1).docx
+*.docx
 backend/db/chroma.sqlite3
 walkthrough.md
 infra/terraform/tfplan
