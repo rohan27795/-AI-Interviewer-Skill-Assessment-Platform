@@ -73,7 +73,7 @@ graph TD
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/Ashishds/ai-interview.git
+git clone https://github.com/rohan27795/-AI-Interviewer-Skill-Assessment-Platform.git
 cd ai-interview
 
 # 2. Setup Backend
